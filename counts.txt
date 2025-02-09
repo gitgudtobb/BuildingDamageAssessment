@@ -1,0 +1,24 @@
+Dataset: hold
+  major-damage: 4605
+  destroyed: 4223
+  minor-damage: 6338
+  no-damage: 37971
+  un-classified: 1255
+Dataset: test
+  minor-damage: 4798
+  destroyed: 3775
+  un-classified: 1012
+  no-damage: 41427
+  major-damage: 3850
+Dataset: tier1
+  no-damage: 117.426
+  minor-damage: 14980
+  destroyed: 13227
+  major-damage: 14161
+  un-classified: 2993
+Dataset: tier3
+  destroyed: 10335
+  minor-damage: 10744
+  major-damage: 7288
+  un-classified: 8751
+  no-damage: 116.209

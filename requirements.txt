@@ -1,0 +1,16 @@
+torch~=2.6.0+cu126
+torchvision~=0.21.0
+pretrainedmodels==0.7.4
+albumentations~=2.0.3
+numpy~=2.2.2
+opencv-python-headless==4.7.0.72
+rasterio~=1.4.3
+tensorboard==2.13.0
+torch-ema==0.3
+matplotlib~=3.10.0
+shapely~=2.0.7
+
+# If you want to train with senet154 encoder, you need to install it from this url: http://data.lip6.fr/cadene/pretrainedmodels/senet154-c7b49a05.pth
+# which is quite a large file, so proceed with caution.
+
+# Place the geotiff datasets in their respective folders.
