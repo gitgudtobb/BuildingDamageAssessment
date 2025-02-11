@@ -12,3 +12,5 @@
 
 /best_resnet34_localization.pth
 /runs/
+
+/__pycache__/
