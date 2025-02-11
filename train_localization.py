@@ -131,9 +131,9 @@ def main():
     parser.add_argument('--data-dir', type=str, default='geotiffs/tier1',
                         help='Path to dataset directory')
     parser.add_argument('--encoder', type=str, default='resnet34',
-                        choices=['resnet34', 'senet154', 'convnext_base'],
+                        choices=['resnet34', 'senet154'],
                         help='Encoder architecture')
-    parser.add_argument('--batch-size', type=int, default=8,
+    parser.add_argument('--batch-size', type=int, default=16,
                         help='Input batch size for training')
     parser.add_argument('--epochs', type=int, default=15,
                         help='Number of epochs to train')
@@ -180,7 +180,7 @@ def main():
     # Optimizer and scheduler
     optimizer = optim.AdamW(model.parameters(), lr=args.lr)
     scheduler = optim.lr_scheduler.ReduceLROnPlateau(
-        optimizer, mode='max', factor=0.5, patience=2
+        optimizer, mode='max', factor=0.5, patience=3
     )
 
     # TensorBoard writer
@@ -197,7 +197,7 @@ def main():
 
         # Validation
         val_loss, val_dice = validate(model, val_loader, device, epoch, writer)
-        scheduler.step(val_loss)
+        scheduler.step(val_dice)
 
         current_lr = optimizer.param_groups[0]['lr']
         if current_lr != last_lr:

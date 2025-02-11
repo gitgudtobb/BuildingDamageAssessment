@@ -7,80 +7,60 @@ import torch.nn.functional as F
 
 from augmentations import load_image, load_mask, apply_transforms
 
-from torchvision.models import resnet34, ResNet34_Weights, convnext_base, ConvNeXt_Base_Weights
+from torchvision.models import resnet34, ResNet34_Weights
 from pretrainedmodels import senet154
-from torchvision.models.convnext import ConvNeXt, CNBlockConfig
 
+# Channel Attention Module
+class ChannelGate(nn.Module):
+    def __init__(self, gate_channels, reduction_ratio=16, num_layers=1):
+        super(ChannelGate, self).__init__()
+        self.gate_channels = gate_channels
+        self.mlp = nn.Sequential(
+            nn.AdaptiveAvgPool2d(1), # Global Average Pooling
+            nn.Flatten(),
+            nn.Linear(gate_channels, gate_channels // reduction_ratio),
+            nn.ReLU(inplace=True),
+            nn.Linear(gate_channels // reduction_ratio, gate_channels)
+        )
+        self.softmax = nn.Softmax(dim=1) # or nn.Sigmoid() - Sigmoid might be better for binary/multi-label
+
+    def forward(self, x):
+        channel_att_raw = self.mlp(x)
+        channel_att_scaled = self.softmax(channel_att_raw).unsqueeze(-1).unsqueeze(-1)
+        return x * channel_att_scaled
+
+# Spatial Attention Module
+class SpatialGate(nn.Module):
+    def __init__(self, gate_channels, reduction_ratio=8, dilation_conv_num=2, dilation_rate=4):
+        super(SpatialGate, self).__init__()
+        self.gate_channels = gate_channels
+        self.spatial_conv = nn.Sequential(
+            nn.Conv2d(gate_channels, gate_channels // reduction_ratio, kernel_size=1),
+            nn.BatchNorm2d(gate_channels // reduction_ratio),
+            nn.ReLU(inplace=True),
+            nn.Conv2d(gate_channels // reduction_ratio, 1, kernel_size=3, padding=1) # Reduced to 1 channel for spatial map
+        )
+        self.sigmoid = nn.Sigmoid()
+
+    def forward(self, x):
+        spatial_att_raw = self.spatial_conv(x)
+        spatial_att_scaled = self.sigmoid(spatial_att_raw)
+        return x * spatial_att_scaled
+
+# CBAM Module
 class CBAM(nn.Module):
-    def __init__(self, channels, reduction_ratio=16, kernel_size=7):
-        super().__init__()
-        self.channel_attention = nn.Sequential(
-            nn.AdaptiveAvgPool2d(1),
-            nn.Conv2d(channels, channels // reduction_ratio, 1),
-            nn.GELU(),
-            nn.Conv2d(channels // reduction_ratio, channels, 1),
-            nn.Sigmoid()
-        )
-        self.spatial_attention = nn.Sequential(
-            nn.Conv2d(2, 1, kernel_size, padding=kernel_size//2),
-            nn.Sigmoid()
-        )
+    def __init__(self, gate_channels, reduction_ratio=8, num_layers=1, spatial_reduction_ratio=16, dilation_conv_num=2, dilation_rate=4):
+        super(CBAM, self).__init__()
+        self.channel_att = ChannelGate(gate_channels, reduction_ratio, num_layers)
+        self.spatial_att = SpatialGate(gate_channels, spatial_reduction_ratio, dilation_conv_num, dilation_rate)
 
     def forward(self, x):
-        # Channel attention
-        ca = self.channel_attention(x)
-        x_channel = x * ca
-        # Spatial attention: concatenate max and mean across channel dimension
-        sa = torch.cat([torch.max(x_channel, dim=1, keepdim=True)[0],
-                        torch.mean(x_channel, dim=1, keepdim=True)], dim=1)
-        sa = self.spatial_attention(sa)
-        return x_channel * sa
-
-
-class ConvNeXtBlockWithCBAM(nn.Module):
-    def __init__(self, dim, layer_scale=1e-6):
-        super().__init__()
-        self.dwconv = nn.Conv2d(dim, dim, kernel_size=7, padding=3, groups=dim)
-        self.norm = nn.LayerNorm(dim, eps=1e-6)
-        self.pwconv1 = nn.Linear(dim, 4 * dim)
-        self.act = nn.GELU()
-        self.pwconv2 = nn.Linear(4 * dim, dim)
-        self.gamma = nn.Parameter(layer_scale * torch.ones(dim), requires_grad=True) if layer_scale > 0 else None
-        self.cbam = CBAM(dim)
-
-    def forward(self, x):
-        residual = x
-        x = self.dwconv(x)
-        x = self.cbam(x)  # Apply CBAM after depthwise conv
-        # Permute to (N, H, W, C) for LayerNorm and Linear layers
-        x = x.permute(0, 2, 3, 1)
-        x = self.norm(x)
-        x = self.pwconv1(x)
-        x = self.act(x)
-        x = self.pwconv2(x)
-        if self.gamma is not None:
-            x = self.gamma * x
-        # Permute back to (N, C, H, W)
-        x = x.permute(0, 3, 1, 2)
-        return residual + x
-
-class LayerNorm2d(nn.Module):
-    def __init__(self, normalized_shape, eps=1e-6):
-        super().__init__()
-        self.ln = nn.LayerNorm(normalized_shape, eps=eps)
-
-    def forward(self, x):
-        # x is of shape [B, C, H, W]. We want to normalize across C.
-        # Permute to [B, H, W, C]
-        x = x.permute(0, 2, 3, 1)
-        # Apply layer normalization (it expects last dim = normalized_shape)
-        x = self.ln(x)
-        # Permute back to [B, C, H, W]
-        x = x.permute(0, 3, 1, 2)
-        return x
+        x_channel_att = self.channel_att(x) # Apply channel attention first
+        x_channel_spatial_att = self.spatial_att(x_channel_att) # Then spatial attention
+        return x_channel_spatial_att
 
 class DecoderBlock(nn.Module):
-    def __init__(self, in_channels, out_channels, skip_channels=None):
+    def __init__(self, in_channels, out_channels, skip_channels=None, use_cbam=True):
         super().__init__()
         self.upsample = nn.Upsample(scale_factor=2, mode='bilinear', align_corners=True)
 
@@ -90,10 +70,12 @@ class DecoderBlock(nn.Module):
             nn.BatchNorm2d(out_channels),
             nn.ReLU(inplace=True)
         )
+        self.cbam = CBAM(out_channels) if use_cbam else nn.Identity() # Conditional CBAM
         self.conv2 = nn.Conv2d(out_channels, out_channels, kernel_size=3, padding=1)
         self.norm = nn.BatchNorm2d(out_channels)
         self.activation = nn.ReLU(inplace=True)
         self.dropout = nn.Dropout2d(0.2)
+        self.use_cbam = use_cbam # Store the flag
 
 
     def forward(self, x, skip=None):
@@ -103,6 +85,10 @@ class DecoderBlock(nn.Module):
 
         # First convolution block
         x = self.conv1(x)
+
+        if self.use_cbam:
+            x = self.cbam(x)
+
         x = self.norm(x)
         x = self.activation(x)
 
@@ -115,9 +101,9 @@ class DecoderBlock(nn.Module):
 
 class LocalizationModel(nn.Module):
     
-    # Supported encoder names: "resnet34", "senet154", "convnext_base"
+    # Supported encoder names: "resnet34", "senet154"
 
-    def __init__(self, encoder_name="convnext_base", pretrained=True, num_classes=1):
+    def __init__(self, encoder_name="resnet34", pretrained=True, num_classes=1, use_cbam_decoder=True):
         super(LocalizationModel, self).__init__()
         self.encoder_name = encoder_name
 
@@ -141,48 +127,9 @@ class LocalizationModel(nn.Module):
             self.encoder = encoder
             encoder_channels = 2048
             self.skip_channels = [1024, 512, 256]
-        elif encoder_name == "convnext_base":
-            self.encoder = convnext_base(weights=ConvNeXt_Base_Weights.IMAGENET1K_V1)
-            depths=[3, 3, 9, 3]
-            dims=[96, 192, 384, 768]
-            in_channels=3
-            # Stem: downsample input by factor 4.
-            self.stem = nn.Sequential(
-                nn.Conv2d(in_channels, dims[0], kernel_size=4, stride=4),
-                LayerNorm2d(dims[0], eps=1e-6)
-            )
-            # Stage 1
-            self.stage1 = nn.Sequential(*[ConvNeXtBlockWithCBAM(dim=dims[0]) for _ in range(depths[0])])
-            self.down1 = nn.Sequential(
-                LayerNorm2d(dims[0], eps=1e-6),
-                nn.Conv2d(dims[0], dims[1], kernel_size=2, stride=2)
-            )
-            # Stage 2
-            self.stage2 = nn.Sequential(*[ConvNeXtBlockWithCBAM(dim=dims[1]) for _ in range(depths[1])])
-            self.down2 = nn.Sequential(
-                LayerNorm2d(dims[1], eps=1e-6),
-                nn.Conv2d(dims[1], dims[2], kernel_size=2, stride=2)
-            )
-            # Stage 3
-            self.stage3 = nn.Sequential(*[ConvNeXtBlockWithCBAM(dim=dims[2]) for _ in range(depths[2])])
-            self.down3 = nn.Sequential(
-                LayerNorm2d(dims[2], eps=1e-6),
-                nn.Conv2d(dims[2], dims[3], kernel_size=2, stride=2)
-            )
-            # Stage 4
-            self.stage4 = nn.Sequential(*[ConvNeXtBlockWithCBAM(dim=dims[3]) for _ in range(depths[3])])
-            
-            # For skip connections, we will use:
-            # - skip1: output of stage1 (dims[0])
-            # - skip2: output of stage2 (dims[1])
-            # - skip3: output of stage3 (dims[2])
-            # The encoder's final output is from stage4 (dims[3]).
-            self.skip_channels = [dims[2], dims[1], dims[0]]
-            encoder_channels = dims[3]
         else:
             raise ValueError("Unsupported encoder type: {}".format(encoder_name))
 
-        # Decoder setup with proper skip connections
         self.decoder = nn.ModuleList([
             # First 3 blocks use skip connections
             DecoderBlock(encoder_channels, 256, skip_channels=self.skip_channels[0]),
@@ -212,17 +159,7 @@ class LocalizationModel(nn.Module):
             x2 = self.encoder.layer2(x1)  # Layer2
             x3 = self.encoder.layer3(x2)  # Layer3
             x4 = self.encoder.layer4(x3)  # Layer4
-            skips = [x3, x2, x1]  # Skip connections for first 3 decoder blocks
-        elif self.encoder_name == "convnext_base":
-            x_stem = self.stem(x)               # [B, dims[0], H/4, W/4]
-            x1 = self.stage1(x_stem)            # [B, dims[0], H/4, W/4]  -> skip3
-            x_down1 = self.down1(x1)            # [B, dims[1], H/8, W/8]
-            x2 = self.stage2(x_down1)           # [B, dims[1], H/8, W/8]  -> skip2
-            x_down2 = self.down2(x2)            # [B, dims[2], H/16, W/16]
-            x3 = self.stage3(x_down2)           # [B, dims[2], H/16, W/16] -> skip1
-            x_down3 = self.down3(x3)            # [B, dims[3], H/32, W/32]
-            x4 = self.stage4(x_down3)           # [B, dims[3], H/32, W/32]
-            skips = [x3, x2, x1]  # Skip connections for first 3 decoder blocks
+            skips = [x3, x2, x1]  # Skip connections for decoder blocks
         else:
             x4 = self.encoder(x)
             skips = []
@@ -240,7 +177,7 @@ class LocalizationModel(nn.Module):
         return out
 
 
-def combined_loss(pred, target, alpha=0.5, beta=0.7, gamma=2):
+def combined_loss(pred, target, alpha=0.5, beta=0.5, gamma=2):
     # Dice Loss Component
     dice_loss = 1 - (2 * torch.sum(pred * target) + 1e-6) / \
                 (torch.sum(pred + target) + 1e-6)
@@ -255,8 +192,8 @@ def combined_loss(pred, target, alpha=0.5, beta=0.7, gamma=2):
     fn = torch.sum((1 - pred) * target)
     tversky_loss = 1 - (tp + 1e-6) / (tp + alpha * fp + beta * fn + 1e-6)
 
-    # Balanced combination
-    return 0.4 * dice_loss + 0.3 * focal_loss + 0.3 * tversky_loss
+    # More emphasis on dice loss
+    return 0.5 * dice_loss + 0.25 * focal_loss + 0.25 * tversky_loss
 
 
 if __name__ == "__main__":
