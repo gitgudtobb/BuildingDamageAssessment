@@ -131,9 +131,9 @@ def main():
     parser.add_argument('--data-dir', type=str, default='geotiffs/tier1',
                         help='Path to dataset directory')
     parser.add_argument('--encoder', type=str, default='resnet34',
-                        choices=['resnet34', 'senet154'],
+                        choices=['resnet34', 'senet154', 'convnext_base'],
                         help='Encoder architecture')
-    parser.add_argument('--batch-size', type=int, default=16,
+    parser.add_argument('--batch-size', type=int, default=8,
                         help='Input batch size for training')
     parser.add_argument('--epochs', type=int, default=15,
                         help='Number of epochs to train')
