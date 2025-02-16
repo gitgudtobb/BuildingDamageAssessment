@@ -66,12 +66,6 @@ def train_epoch(model, dataloader, optimizer, device, epoch, writer):
         optimizer.zero_grad()
         outputs = model(images)
         loss = combined_loss(outputs, masks)
-
-        l2_reg = 0.0
-        for param in model.decoder.parameters():
-            l2_reg += torch.norm(param, p=2)
-        loss += 1e-4 * l2_reg
-
         loss.backward()
         optimizer.step()
 
@@ -131,13 +125,13 @@ def main():
     parser.add_argument('--data-dir', type=str, default='geotiffs/tier1',
                         help='Path to dataset directory')
     parser.add_argument('--encoder', type=str, default='resnet34',
-                        choices=['resnet34', 'senet154'],
+                        choices=['resnet34', 'senet154', 'convnext_base'],
                         help='Encoder architecture')
     parser.add_argument('--batch-size', type=int, default=16,
                         help='Input batch size for training')
-    parser.add_argument('--epochs', type=int, default=15,
+    parser.add_argument('--epochs', type=int, default=50,
                         help='Number of epochs to train')
-    parser.add_argument('--lr', type=float, default=1e-4,
+    parser.add_argument('--lr', type=float, default=5e-5,
                         help='Learning rate')
     parser.add_argument('--resume', type=str, default=None,
                         help='Path to checkpoint to resume from')
@@ -178,9 +172,9 @@ def main():
     last_lr = args.lr
 
     # Optimizer and scheduler
-    optimizer = optim.AdamW(model.parameters(), lr=args.lr)
+    optimizer = optim.AdamW(model.parameters(), lr=args.lr, weight_decay=1e-5)
     scheduler = optim.lr_scheduler.ReduceLROnPlateau(
-        optimizer, mode='max', factor=0.5, patience=3
+        optimizer, mode='min', factor=0.5, patience=2
     )
 
     # TensorBoard writer
@@ -197,7 +191,7 @@ def main():
 
         # Validation
         val_loss, val_dice = validate(model, val_loader, device, epoch, writer)
-        scheduler.step(val_dice)
+        scheduler.step(val_loss)
 
         current_lr = optimizer.param_groups[0]['lr']
         if current_lr != last_lr:

@@ -46,30 +46,23 @@ def apply_transforms(image, mask, augment=True):
     transform = A.Compose([
         A.Resize(512, 512),  # Force resize first
 
-        A.RandomGridShuffle(grid=(2,2), p=0.3),
-        A.ElasticTransform(p=0.2),
+        A.ElasticTransform(p=0.2) if augment else A.NoOp(),
 
-        A.Rotate(limit=30, p=0.5),
+        A.Rotate(limit=30, p=0.5) if augment else A.NoOp(),
 
-        A.CoarseDropout(
-            num_holes_range=(1, 8),
-            hole_height_range=(1, 32),
-            hole_width_range=(1, 32),
-            fill="random",
-            p=0.2
-        ),
+        A.CoarseDropout(num_holes_range=(1, 8), hole_height_range=(1, 16), hole_width_range=(1, 16), fill="random", p=0.2) if augment else A.NoOp(),
 
-        A.HueSaturationValue(hue_shift_limit=20, sat_shift_limit=30, val_shift_limit=20, p=0.15),
-        A.RandomBrightnessContrast(brightness_limit=0.2, contrast_limit=0.2, p=0.15),
-        A.RandomGamma((80, 120), p=0.15),
+        A.HueSaturationValue(hue_shift_limit=20, sat_shift_limit=30, val_shift_limit=20, p=0.15) if augment else A.NoOp(),
+        A.RandomBrightnessContrast(brightness_limit=0.2, contrast_limit=0.2, p=0.15) if augment else A.NoOp(),
+        A.RandomGamma((80, 120), p=0.15) if augment else A.NoOp(),
 
-        A.CLAHE(clip_limit=2.0, tile_grid_size=(8, 8), p=0.1),
-        A.GaussianBlur(blur_limit=(3, 7), p=0.1),
-        A.GaussNoise(std_range=(0.2, 0.44), mean_range=(0.0, 0.0), per_channel=True, noise_scale_factor=1, p=0.1),
+        A.CLAHE(clip_limit=2.0, tile_grid_size=(8, 8), p=0.1) if augment else A.NoOp(),
+        A.GaussianBlur(blur_limit=(3, 7), p=0.1) if augment else A.NoOp(),
+        A.GaussNoise(std_range=(0.2, 0.44), mean_range=(0.0, 0.0), per_channel=True, noise_scale_factor=1, p=0.1) if augment else A.NoOp(),
 
         A.HorizontalFlip(p=0.4) if augment else A.NoOp(),
         A.VerticalFlip(p=0.4) if augment else A.NoOp(),
-        A.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225]),
+        A.Normalize(mean=[0.334, 0.347, 0.262], std=[0.174, 0.143, 0.134]),
         ToTensorV2()
     ], additional_targets={'mask': 'mask'})
 
@@ -87,8 +80,8 @@ def apply_transforms(image, mask, augment=True):
     return image_tensor, mask_tensor
 if __name__ == "__main__":
 
-    image_path = "geotiffs/tier1/images/hurricane-florence_00000451_pre_disaster.tif"
-    json_path = "geotiffs/tier1/labels/hurricane-florence_00000451_pre_disaster.json"
+    image_path = "geotiffs/tier1/images/socal-fire_00000576_pre_disaster.tif"
+    json_path = "geotiffs/tier1/labels/socal-fire_00000576_pre_disaster.json"
 
     image = load_image(image_path)
     mask = load_mask(json_path, img_shape=image.shape[:2])

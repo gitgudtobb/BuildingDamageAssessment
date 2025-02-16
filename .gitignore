@@ -14,4 +14,4 @@
 /runs/
 
 /__pycache__/
-/.idea/
+/.idea//predictions_resnet34/

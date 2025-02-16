@@ -22,3 +22,9 @@ Dataset: tier3
   major-damage: 7288
   un-classified: 8751
   no-damage: 116.209
+
+Mean values (RGB): [0.334 0.347 0.262]
+Std values (RGB):  [0.174 0.143 0.134]
+
+Mean values (RGB): [0.33381655 0.34701091 0.26194201]
+Std values (RGB):  [0.17362363 0.14349794 0.13361736]
