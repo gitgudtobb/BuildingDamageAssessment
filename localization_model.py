@@ -87,6 +87,8 @@ class DecoderBlock(nn.Module):
     def forward(self, x, skip=None):
         x = self.upsample(x)
         if skip is not None:
+            if x.size()[2:] != skip.size()[2:]:
+                skip = nn.functional.interpolate(skip, size=x.shape[2:], mode='bilinear', align_corners=True)
             x = torch.cat([x, skip], dim=1)
 
         # First convolution block
@@ -144,7 +146,7 @@ class LocalizationModel(nn.Module):
             self.layer3 = nn.Sequential(*convnext.features[6:8])
             self.layer4 = nn.Sequential(*convnext.features[8:9])
             encoder_channels = 1024
-            self.skip_channels = [256, 128, 96]
+            self.skip_channels = [1024, 512, 256]
         else:
             raise ValueError("Unsupported encoder type: {}".format(encoder_name))
 
@@ -218,7 +220,7 @@ class LocalizationModel(nn.Module):
     tversky_loss = 1 - (tp + 1e-6) / (tp + alpha * fp + beta * fn + 1e-6)
 
     # More emphasis on dice loss
-    return 0.5 * dice_loss + 0.25 * focal_loss + 0.25 * tversky_loss'''
+    return 0.5 * dice_loss + 0.25 * focal_loss + 0.25 * tversky_loss
 
 
 def calculate_boundary_map(mask):
@@ -239,7 +241,7 @@ def calculate_boundary_map(mask):
     boundary_map = (boundary_magnitude > 0.1).float()  # Threshold to get binary boundaries
 
     return boundary_map
-
+'''
 
 def dice_loss(pred, target):
     intersection = torch.sum(pred * target)
@@ -262,23 +264,23 @@ def tversky_loss(pred, target, alpha=0.7, beta=0.3, smooth=1e-6):
     tversky = (tp + smooth) / (tp + alpha * fp + beta * fn + smooth)
     return 1 - tversky
 
-
+'''
 def boundary_loss(pred_mask, target_mask):
     pred_boundary = calculate_boundary_map(pred_mask)
     target_boundary = calculate_boundary_map(target_mask)
 
     loss = F.binary_cross_entropy(pred_boundary, target_boundary)
     return loss
+'''
 
-
-def combined_loss(pred, target, dice_weight=0.4, focal_weight=0.3, tversky_weight=0.3,
+def combined_loss(pred, target, dice_weight=0.5, focal_weight=0.25, tversky_weight=0.25,
                                 boundary_weight=0.2):
     d_loss = dice_weight * dice_loss(pred, target)
     f_loss = focal_weight * focal_loss(pred, target)
     t_loss = tversky_weight * tversky_loss(pred, target)
-    b_loss = boundary_weight * boundary_loss(pred, target)
+    # b_loss = boundary_weight * boundary_loss(pred, target)
 
-    total_loss = d_loss + f_loss + t_loss + b_loss
+    total_loss = d_loss + f_loss + t_loss # + b_loss
     return total_loss
 
 
@@ -299,7 +301,7 @@ if __name__ == "__main__":
     sampled_files = all_image_files[:sample_size]
     print("Using {} out of {} images for this run.".format(sample_size, len(all_image_files)))
 
-    model = LocalizationModel(encoder_name="resnet34", pretrained=True, num_classes=1)
+    model = LocalizationModel(encoder_name="convnext_base", pretrained=True, num_classes=1)
     model.eval()
 
     losses = []

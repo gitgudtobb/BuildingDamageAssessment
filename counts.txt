@@ -28,3 +28,12 @@ Std values (RGB):  [0.174 0.143 0.134]
 
 Mean values (RGB): [0.33381655 0.34701091 0.26194201]
 Std values (RGB):  [0.17362363 0.14349794 0.13361736]
+
+resnet34:
+Epoch 44 completed in 965.9s
+Train Loss: 0.5504 | Val Loss: 0.4274
+Train Dice: 0.7836 | Val Dice: 0.7519
+
+lr = 5e-5
+bs = 16
+epoch = 50

@@ -37,7 +37,7 @@ class DamageLocalizationDataset(Dataset):
         image = load_image(image_path)
         mask = load_mask(label_path, img_shape=image.shape[:2])
 
-        if np.mean(mask) == 0 and random.randint(1,10) == 1:
+        if np.mean(mask) == 0 and random.randint(1,20) == 1:
             return self[np.random.randint(len(self))]
 
         image_tensor, mask_tensor = apply_transforms(
@@ -122,16 +122,16 @@ def validate(model, dataloader, device, epoch, writer):
 
 def main():
     parser = argparse.ArgumentParser(description='Damage Localization Training')
-    parser.add_argument('--data-dir', type=str, default='geotiffs/tier1',
+    parser.add_argument('--data-dir', type=str, default='geotiffs/tier1o',
                         help='Path to dataset directory')
-    parser.add_argument('--encoder', type=str, default='resnet34',
+    parser.add_argument('--encoder', type=str, default='convnext_base',
                         choices=['resnet34', 'senet154', 'convnext_base'],
                         help='Encoder architecture')
-    parser.add_argument('--batch-size', type=int, default=16,
+    parser.add_argument('--batch-size', type=int, default=8,
                         help='Input batch size for training')
-    parser.add_argument('--epochs', type=int, default=50,
+    parser.add_argument('--epochs', type=int, default=10,
                         help='Number of epochs to train')
-    parser.add_argument('--lr', type=float, default=5e-5,
+    parser.add_argument('--lr', type=float, default=1e-4,
                         help='Learning rate')
     parser.add_argument('--resume', type=str, default=None,
                         help='Path to checkpoint to resume from')

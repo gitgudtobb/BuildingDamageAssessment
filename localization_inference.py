@@ -20,7 +20,7 @@ def infer(model, dataloader, device, output_dir):
 
             outputs = model(images)
 
-            preds = (outputs > 0.5).float().cpu() # Apply threshold and move to CPU
+            preds = (outputs > 0.8).float().cpu() # Apply threshold and move to CPU
 
             for i in range(preds.shape[0]):
                 mask_pred = preds[i]
