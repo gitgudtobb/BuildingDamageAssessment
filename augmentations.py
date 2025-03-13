@@ -38,7 +38,8 @@ def load_mask(json_path, img_shape):
 
 
 def apply_transforms(image, mask, augment=True):
-    mask = (mask * 255).astype(np.uint8) if mask.dtype != np.uint8 else mask
+    if mask is not None:
+        mask = (mask * 255).astype(np.uint8) if mask.dtype != np.uint8 else mask
 
     if image.dtype != np.uint8:
         image = image.astype(np.uint8)
@@ -64,20 +65,24 @@ def apply_transforms(image, mask, augment=True):
         A.VerticalFlip(p=0.4) if augment else A.NoOp(),
         A.Normalize(mean=[0.334, 0.347, 0.262], std=[0.174, 0.143, 0.134]),
         ToTensorV2()
-    ], additional_targets={'mask': 'mask'})
+    ], additional_targets={'mask': 'mask'}if mask is not None else {})
 
-    transformed = transform(
-        image=image,
-        mask=mask,
-        mask_interpolation=cv2.INTER_NEAREST  # Crucial for masks
-    )
+    if mask is not None:
+        transformed = transform(
+            image=image,
+            mask=mask,
+            mask_interpolation=cv2.INTER_NEAREST  # Crucial for masks
+        )
+        # Post-process for mask case
+        image_tensor = transformed['image']
+        mask_tensor = transformed['mask'].float().unsqueeze(0)  # Add channel dim
+        mask_tensor = (mask_tensor > 0.5).float()  # Ensure binary
+        return image_tensor, mask_tensor
+    else:
+        transformed = transform(image=image)
+        image_tensor = transformed['image']
+        return image_tensor, None # Return None for mask
 
-    # Post-process
-    image_tensor = transformed['image']
-    mask_tensor = transformed['mask'].float().unsqueeze(0)  # Add channel dim
-    mask_tensor = (mask_tensor > 0.5).float()  # Ensure binary
-
-    return image_tensor, mask_tensor
 if __name__ == "__main__":
 
     image_path = "geotiffs/tier1/images/socal-fire_00000576_pre_disaster.tif"

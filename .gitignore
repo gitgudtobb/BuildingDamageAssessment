@@ -4,14 +4,20 @@
 /geotiffs/test/images/
 /geotiffs/test/labels/
 
+
 /geotiffs/tier1/images/
 /geotiffs/tier1/labels/
+
 
 /geotiffs/tier3/images/
 /geotiffs/tier3/labels/
 
-/best_resnet34_localization.pth
+/weights/
 /runs/
 
 /__pycache__/
-/.idea//predictions_resnet34/
+/.idea/
+/predictions_resnet34/
+/datasets/yolo_dataset/
+/yolo_building_localization/
+/BuildingDamageAssessment.code-workspace
