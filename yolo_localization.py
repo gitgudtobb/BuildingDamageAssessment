@@ -54,7 +54,7 @@ class YOLODamageLocalization:
             'verbose': True,
             'project': 'yolo_building_localization',
             'name': self.args.encoder + '_yolo',
-            
+             
             'degrees': 45.0,      
             'translate': 0.2,     
             'scale': 0.5,
