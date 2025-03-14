@@ -3,8 +3,8 @@ import json
 from collections import Counter
 
 # Define paths to datasets
-datasets = ["hold", "test", "tier1", "tier3"]
-base_path = "C:/Users/yusuf/Desktop/budaas/geotiffs"
+datasets = [ "tier1"]
+base_path = "geotiffs"
 
 # Initialize counters for each dataset
 damage_counts = {dataset: Counter() for dataset in datasets}

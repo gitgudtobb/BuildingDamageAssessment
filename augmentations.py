@@ -6,7 +6,7 @@ import numpy as np
 import rasterio
 import json
 import cv2
-import matplotlib.pyplot as plt
+import matplotlib.pyplot as plt # type: ignore
 from rasterio.plot import reshape_as_image
 from albumentations.pytorch import ToTensorV2
 

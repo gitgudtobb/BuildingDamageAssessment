@@ -22,3 +22,5 @@
 /yolo_building_localization/
 /BuildingDamageAssessment.code-workspace
 /geotiffs
+best_convnext_base_localization.pth
+best_twin_resnet.pth

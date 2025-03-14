@@ -21,7 +21,7 @@ Dataset: tier3
   minor-damage: 10744  
   major-damage: 7288  
   destroyed: 10335
-  un-classified: 8751
+  un-classified: 8752
 
 Mean values (RGB): [0.334 0.347 0.262]
 Std values (RGB):  [0.174 0.143 0.134]

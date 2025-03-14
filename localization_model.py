@@ -2,12 +2,12 @@ import os
 import random
 
 import numpy as np
-import torch
-import torch.nn as nn
-import torch.nn.functional as F
+import torch # type: ignore
+import torch.nn as nn # type: ignore
+import torch.nn.functional as F # type: ignore
 import kornia.filters as K
-from pretrainedmodels import senet154
-from torchvision.models import resnet34, ResNet34_Weights, convnext_base, ConvNeXt_Base_Weights
+from pretrainedmodels import senet154 # type: ignore
+from torchvision.models import resnet34, ResNet34_Weights, convnext_base, ConvNeXt_Base_Weights # type: ignore
 
 from augmentations import load_image, load_mask, apply_transforms
 

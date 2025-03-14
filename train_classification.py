@@ -2,15 +2,15 @@ import json
 import os
 import random
 import cv2
-from matplotlib import pyplot as plt
+from matplotlib import pyplot as plt # type: ignore
 import numpy as np
-import torch
-import torch.nn as nn
-from torch.utils.data import Dataset, DataLoader
-from torchvision import transforms, models
+import torch # type: ignore
+import torch.nn as nn # type: ignore
+from torch.utils.data import Dataset, DataLoader # type: ignore
+from torchvision import transforms, models # type: ignore
 from shapely.wkt import loads as wkt_loads
-from tqdm import tqdm
-from torchvision.models import  ResNet34_Weights
+from tqdm import tqdm # type: ignore
+from torchvision.models import  ResNet34_Weights # type: ignore
 from augmentations import load_image
 
 # 1. Dataset Class with Localization
@@ -390,9 +390,9 @@ if __name__ == "__main__":
     import argparse
 
     parser = argparse.ArgumentParser(description="Building Damage Assessment")
-    parser.add_argument('--base_path', type=str, default="geotiffs/tier3",
+    parser.add_argument('--base_path', type=str, default="geotiffs/tier1",
                         help="Base path for data")
-    parser.add_argument('--mode', choices=['train', 'predict'], default='predict',
+    parser.add_argument('--mode', choices=['train', 'predict'], default='train',
                         help="Mode: train or predict")
     parser.add_argument('--model_path', type=str, default="best_twin_resnet.pth",
                         help="Path to model weights")

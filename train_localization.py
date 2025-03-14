@@ -3,10 +3,10 @@ import random
 import numpy as np
 import argparse
 import time
-import torch
-import torch.optim as optim
-from torch.utils.data import Dataset, DataLoader
-from torch.utils.tensorboard import SummaryWriter
+import torch # type: ignore
+import torch.optim as optim # type: ignore
+from torch.utils.data import Dataset, DataLoader # type: ignore
+from torch.utils.tensorboard import SummaryWriter # type: ignore
 from localization_model import LocalizationModel, combined_loss
 from augmentations import load_image, load_mask, apply_transforms
 from torch_ema import ExponentialMovingAverage
@@ -122,16 +122,16 @@ def validate(model, dataloader, device, epoch, writer):
 
 def main():
     parser = argparse.ArgumentParser(description='Damage Localization Training')
-    parser.add_argument('--data-dir', type=str, default='geotiffs/tier1o',
+    parser.add_argument('--data-dir', type=str, default='geotiffs/tier1',
                         help='Path to dataset directory')
     parser.add_argument('--encoder', type=str, default='convnext_base',
                         choices=['resnet34', 'convnext_base'],
                         help='Encoder architecture')
-    parser.add_argument('--batch-size', type=int, default=8,
+    parser.add_argument('--batch-size', type=int, default=16,
                         help='Input batch size for training')
-    parser.add_argument('--epochs', type=int, default=10,
+    parser.add_argument('--epochs', type=int, default=150,
                         help='Number of epochs to train')
-    parser.add_argument('--lr', type=float, default=1e-4,
+    parser.add_argument('--lr', type=float, default=5e-4,
                         help='Learning rate')
     parser.add_argument('--resume', type=str, default=None,
                         help='Path to checkpoint to resume from')

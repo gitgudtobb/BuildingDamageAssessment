@@ -1,9 +1,9 @@
 import argparse
 import os
 
-import torch
-from torch.utils.data import DataLoader
-from torchvision.utils import save_image
+import torch # type: ignore
+from torch.utils.data import DataLoader # type: ignore
+from torchvision.utils import save_image # type: ignore
 
 from localization_model import LocalizationModel
 from train_localization import DamageLocalizationDataset
