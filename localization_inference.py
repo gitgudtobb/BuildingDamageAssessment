@@ -38,7 +38,7 @@ def main():
     parser.add_argument('--data-dir', type=str, default='geotiffs/tier1',
                         help='Path to dataset directory')
     parser.add_argument('--encoder', type=str, default='resnet34',
-                        choices=['resnet34', 'senet154'],
+                        choices=['resnet34', 'convnext_base'],
                         help='Encoder architecture')
     parser.add_argument('--batch-size', type=int, default=16,
                         help='Input batch size for inference')
