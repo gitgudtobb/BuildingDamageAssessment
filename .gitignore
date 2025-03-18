@@ -24,3 +24,5 @@
 /geotiffs
 best_convnext_base_localization.pth
 best_twin_resnet.pth
+/predictions
+best_resnet34_localization.pth

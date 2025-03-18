@@ -177,7 +177,7 @@ class BuildingDamageDataset(Dataset):
 
 # 2. Two-Stream ResNet34 Model
 class TwinResNet(nn.Module):
-    def __init__(self, num_classes=4, pretrained=True):
+    def __init__(self, num_classes=4, pretrained=False):
         super(TwinResNet, self).__init__()
 
         # Load pretrained models
@@ -185,15 +185,17 @@ class TwinResNet(nn.Module):
         self.post_stream = models.resnet34(weights=ResNet34_Weights.DEFAULT)
 
         # Custom pretrained weights
-        if not pretrained and os.path.exists("weights/best_resnet34_localization.pth"):
+        if not pretrained and os.path.exists("best_resnet34_localization.pth"):
             try:
-                pre_weights = torch.load("weights/best_resnet34_localization.pth")
-                post_weights = torch.load("weights/best_resnet34_localization.pth")
+                pre_weights = torch.load("best_resnet34_localization.pth")
+                post_weights = torch.load("best_resnet34_localization.pth")
                 self.pre_stream.load_state_dict(pre_weights)
                 self.post_stream.load_state_dict(post_weights)
                 print("Loaded custom pretrained weights")
             except Exception as e:
                 print(f"Could not load pretrained weights: {e}")
+        else:
+            print("Using default pretrained weights")        
 
         # Remove final layers
         self.pre_stream = nn.Sequential(*list(self.pre_stream.children())[:-1])
