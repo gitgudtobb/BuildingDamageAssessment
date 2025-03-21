@@ -27,3 +27,4 @@
 /instance_segmentation
 /yolo11l-seg.pt
 /yolo11n.pt
+best_twin_vit.pth

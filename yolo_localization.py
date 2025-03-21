@@ -1,6 +1,8 @@
 import os
 os.environ["NO_ALBUMENTATIONS_UPDATE"] = "1"
 
+os.environ['YOLO_VERBOSE'] = 'false'
+
 import argparse
 import time
 import yaml
@@ -178,26 +180,6 @@ class YOLODamageLocalization:
         if 'metrics/recall(B)' in results.results_dict:
             print(f"Best Recall: {results.results_dict['metrics/recall(B)']:.3f}")
 
-        # Save metrics to file
-        metrics_path = Path(self.model.ckpt_dir) / 'training_metrics.csv'
-        results.results_df.to_csv(metrics_path, index=False)
-        print(f"Metrics saved to {metrics_path}")
-
-        writer = SummaryWriter(log_dir=Path(self.model.ckpt_dir) / 'tensorboard_logs')
-
-        metrics_dict = results.results_dict
-        if metrics_dict:
-            writer.add_scalar('mAP50', metrics_dict.get('metrics/mAP50(B)', 0), self.args.epochs)
-            writer.add_scalar('Precision', metrics_dict.get('metrics/precision(B)', 0), self.args.epochs)
-            writer.add_scalar('Recall', metrics_dict.get('metrics/recall(B)', 0), self.args.epochs)
-            writer.add_scalar('box_loss', metrics_dict.get('train/box_loss', 0), self.args.epochs)
-            writer.add_scalar('cls_loss', metrics_dict.get('train/cls_loss', 0), self.args.epochs)
-            writer.add_scalar('dfl_loss', metrics_dict.get('train/dfl_loss', 0), self.args.epochs)
-            writer.add_scalar('mask_loss', metrics_dict.get('train/mask_loss', 0), self.args.epochs)
-
-        writer.close()
-        print(f"TensorBoard logs saved to: {Path(self.model.ckpt_dir) / 'tensorboard_logs'}")
-
         return results
 
 def main():
@@ -230,11 +212,6 @@ def main():
     if 'metrics/mAP50(B)' in results.results_dict:
         print(f"Final mAP50: {results.results_dict['metrics/mAP50(B)']:.3f}")
 
-    # Plotting segmentation results if supported
-    if hasattr(results, 'plot_labels'):
-        results.plot_labels()
-    if hasattr(results, 'plot_results'):
-        results.plot_results()
     duration = time.time() - start_time
 
     print(f'\nTraining completed in {duration:.1f} seconds')
