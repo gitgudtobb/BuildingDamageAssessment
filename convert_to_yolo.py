@@ -27,6 +27,15 @@ def convert_to_yolo_seg_format(images_dir, labels_dir, output_dir):
     # Process all JSON files
     json_files = list(Path(labels_dir).glob('*.json'))
 
+    # Define a mapping for damage types to class IDs
+    damage_to_class_id = {
+        'no-damage': 0,
+        'minor-damage': 1,
+        'major-damage': 2,
+        'destroyed': 3,
+        'un-classified': 0  # Assuming 'un-classified' should map to 0
+    }
+
     for json_path in json_files:
         # Get corresponding image path
         image_name = json_path.name.replace('_disaster.json', '_disaster.png')
@@ -70,8 +79,21 @@ def convert_to_yolo_seg_format(images_dir, labels_dir, output_dir):
                     normalized_y = y_coord / img_height
                     normalized_coords.extend([f"{normalized_x:.6f}", f"{normalized_y:.6f}"]) # Format and add x, then y
 
-                yolo_seg_line = f"0 {' '.join(normalized_coords)}" # Class ID 0 building
+                # Get the damage type and map it to a class ID
+                damage_type = feature.get('properties', {}).get('subtype') or \
+                              feature.get('properties', {}).get('damage_subtype') or \
+                              feature.get('properties', {}).get('damage') or \
+                              'no-damage' # Default to 'no-damage' if no info
+
+                class_id = damage_to_class_id.get(damage_type.lower(), 0) # Get class ID, default to 0 if not found
+
+                yolo_seg_line = f"{class_id} {' '.join(normalized_coords)}" # Use the extracted class ID
                 yolo_seg_annotations.append(yolo_seg_line)
+
+                #yolo_seg_line = f"0 {' '.join(normalized_coords)}" # Class ID 0 building
+                #yolo_seg_annotations.append(yolo_seg_line)
+
+                #yolo_seg_annotations.append(yolo_seg_line)
 
             except (KeyError, IndexError, ValueError) as e:
                 print(f"Skipping invalid feature in {json_path.name}: {str(e)}")
@@ -133,11 +155,11 @@ def x():
         "geotiffs/tier1/images"
     ]
 
-    os.makedirs("datasets/yolo_dataset/images", exist_ok=True)
+    os.makedirs("datasets/classification/images", exist_ok=True)
     for input_dir in input_dirs:
         for tif_path in glob.glob(os.path.join(input_dir, "*.tif")):
-            if "post" in tif_path and  random.randint(1, 100) > 4:
-                continue
+            #if "post" in tif_path and  random.randint(1, 100) > 4:
+            #    continue
             try:
                 # Use imageio to read the TIFF file
                 arr = imageio.imread(tif_path)
@@ -149,7 +171,7 @@ def x():
                 # Create a PIL Image from the array
                 img = Image.fromarray(arr)
                 base_name = os.path.splitext(os.path.basename(tif_path))[0]
-                png_path = os.path.join("datasets/yolo_dataset/images", base_name + ".png")
+                png_path = os.path.join("datasets/classification/images", base_name + ".png")
                 img.save(png_path, "PNG")
                 print(f"Converted {tif_path} to {png_path}")
             except Exception as e:
@@ -157,7 +179,7 @@ def x():
 
 def main():
 
-    x()
+    #x()
 
     parser = argparse.ArgumentParser(description='Convert xView2 annotations to YOLO format')
     parser.add_argument('--images-dir', type=str, required=True,
@@ -175,7 +197,7 @@ def main():
         Path(args.output_dir)
     )
 
-    organize_yolo_dataset('datasets/yolo_dataset')
+    #organize_yolo_dataset('datasets/yolo_dataset')
 
 
 

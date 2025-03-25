@@ -1,22 +1,21 @@
 import json
 import os
+import pickle
 import random
 import cv2
-from matplotlib import pyplot as plt
 import numpy as np
 import torch
 import torch.nn as nn
 from torch.utils.data import Dataset, DataLoader
-from torchvision import transforms, models
+from torchvision import transforms
 from shapely.wkt import loads as wkt_loads
 from tqdm import tqdm
-from torchvision.models import ResNet34_Weights
 from augmentations import load_image
 from PIL import Image as PILImage
 from ultralytics import YOLO
 from transformers import ViTModel
 
-# 1. Dataset Class with Localization (Keep this)
+# 1. Dataset Class with Localization
 class BuildingDamageDataset(Dataset):
     def __init__(self, labels_path, images_path, transform=None):
         self.features = []
@@ -96,7 +95,7 @@ class BuildingDamageDataset(Dataset):
 
         # Load images
         pre_img = load_image(item['pre_img_path'])
-        post_img = load_image(item['pre_img_path']) # Assuming pre and post have same dimensions for cropping
+        post_img = load_image(item['post_img_path'])
         if pre_img.dtype != np.uint8:
             pre_img = pre_img.astype(np.uint8)
         if post_img.dtype != np.uint8:
@@ -192,7 +191,7 @@ def perform_instance_segmentation(image_path, weights_path="instance_segmentatio
     # Perform inference
     results = model(image_path)
 
-    # Iterate through the detected objects and yield cropped images
+    # Iterate through the detected objects and yield cropped images, bounding boxes, and masks
     for result in results:
         if result.masks is not None:
             masks = result.masks.xy  # Get the mask coordinates
@@ -217,9 +216,13 @@ def perform_instance_segmentation(image_path, weights_path="instance_segmentatio
                 x_min, y_min, x_max, y_max = bbox
                 cropped_building_np = segmented_building_np[y_min:y_max, x_min:x_max]
                 cropped_building_pil = PILImage.fromarray(cropped_building_np)
-                yield cropped_building_pil
 
-def predict(base_path="geotiffs/tier1",
+                # Resize the predicted mask to the size of the cropped building
+                predicted_mask_cropped = building_mask[y_min:y_max, x_min:x_max]
+
+                yield cropped_building_pil, (x_min, y_min, x_max, y_max), predicted_mask_cropped
+
+def predict(base_path="datasets/classification",
             yolo_weights_path="instance_segmentation/l_seg/weights/best.pt",
             model_path="best_twin_vit.pth",
             device=None):
@@ -243,44 +246,130 @@ def predict(base_path="geotiffs/tier1",
                              std=[0.229, 0.224, 0.225])
     ])
 
-    images_path = os.path.join(base_path, "train") # TODO: fix
+    images_path = os.path.join(base_path, "images")
     image_filenames = [f for f in os.listdir(images_path) if f.endswith(('.tif', '.png', '.jpg'))]
     image_filenames.sort()
 
     print("Starting prediction using instance segmentation with TwinViT...")
 
+    results = {} # Dictionary to store results per image
+
     with torch.no_grad():
         for filename in tqdm(image_filenames, desc="Processing images"):
-            if "_pre_disaster" in filename:
+            if "_pre_disaster" in filename and random.randint(0,100) < 5:
                 base_id = filename.replace("_pre_disaster", "").split('.')[0]
                 post_filename = f"{base_id}_post_disaster{os.path.splitext(filename)[1]}"
                 pre_image_path = os.path.join(images_path, filename)
                 post_image_path = os.path.join(images_path, post_filename)
 
                 if os.path.exists(post_image_path):
-                    pre_building_crops = list(perform_instance_segmentation(pre_image_path, yolo_weights_path))
-                    post_building_crops = list(perform_instance_segmentation(post_image_path, yolo_weights_path))
+                    pre_building_data = list(perform_instance_segmentation(pre_image_path, yolo_weights_path))
+                    post_building_data = list(perform_instance_segmentation(post_image_path, yolo_weights_path))
 
                     print(f"Processing pair: {filename} and {post_filename}")
-                    print(f"  Detected {len(pre_building_crops)} buildings in pre-disaster image.")
-                    print(f"  Detected {len(post_building_crops)} buildings in post-disaster image.")
+                    print(f"  Detected {len(pre_building_data)} buildings in pre-disaster image.")
+                    print(f"  Detected {len(post_building_data)} buildings in post-disaster image.")
 
-                    num_buildings = min(len(pre_building_crops), len(post_building_crops))
+                    predictions = []
+                    bounding_boxes = []
+                    predicted_masks = []
+
+                    num_buildings = min(len(pre_building_data), len(post_building_data))
                     for i in range(num_buildings):
-                        pre_crop = pre_building_crops[i]
-                        post_crop = post_building_crops[i]
+                        try:
+                            pre_crop, _, _ = pre_building_data[i]
+                            post_crop, bbox, predicted_mask = post_building_data[i]
 
-                        # Preprocess for classification
-                        pre_tensor = transform(pre_crop).unsqueeze(0).to(device)
-                        post_tensor = transform(post_crop).unsqueeze(0).to(device)
+                            # Preprocess for classification
+                            pre_tensor = transform(pre_crop).unsqueeze(0).to(device)
+                            post_tensor = transform(post_crop).unsqueeze(0).to(device)
 
-                        # Predict damage
-                        outputs = classification_model(pre_tensor, post_tensor)
-                        _, predicted = torch.max(outputs, 1)
-                        damage_level = {0: 'no-damage', 1: 'minor-damage', 2: 'major-damage', 3: 'destroyed'}[predicted.item()]
-                        print(f"  Building {i+1}: Predicted damage - {damage_level}")
+                            # Predict damage
+                            outputs = classification_model(pre_tensor, post_tensor)
+                            _, predicted = torch.max(outputs, 1)
+                            damage_level = {0: 'no-damage', 1: 'minor-damage', 2: 'major-damage', 3: 'destroyed'}[predicted.item()]
+                            print(f"  Building {i+1}: Predicted damage - {damage_level}, Bounding Box: {bbox}")
+                            predictions.append(damage_level)
+                            bounding_boxes.append(bbox)
+                            predicted_masks.append(predicted_mask)
+                        except IndexError:
+                            print(f"Warning: Index out of bounds for building {i+1}. Skipping.")
+                            continue
+
+                    results[post_filename] = list(zip(bounding_boxes, predictions, predicted_masks)) # Store bounding boxes, predictions, and predicted masks
                 else:
                     print(f"Warning: Post-disaster image not found for {filename}")
+    return results
+
+def visualize_masks(base_path="geotiffs/tier1", results=None):
+    if results is None:
+        print("No results to visualize.")
+        return
+
+    images_path = os.path.join(base_path, "images")
+    labels_path = os.path.join(base_path, "labels")
+    output_dir = "visualize_preds"
+    os.makedirs(output_dir, exist_ok=True)
+
+    # Define color map for damage levels
+    damage_color_map = {
+        0: [0, 255, 0],     # Green for no damage
+        1: [255, 255, 0],   # Yellow for minor damage
+        2: [255, 165, 0],   # Orange for major damage
+        3: [255, 0, 0]      # Red for destroyed
+    }
+    damage_label_map = {'no-damage': 0, 'minor-damage': 1, 'major-damage': 2, 'destroyed': 3}
+
+
+    for post_filename, building_results in results.items():
+        image_id = post_filename.replace("_post_disaster" + os.path.splitext(post_filename)[1], "")
+        post_image_path = os.path.join(images_path, post_filename)
+
+        if os.path.exists(post_image_path):
+            original_image = cv2.imread(post_image_path)
+            height, width, _ = original_image.shape
+
+            # Create ground truth mask
+            gt_mask_colored = np.zeros((height, width, 3), dtype=np.uint8)
+            label_filename = f"{image_id}_post_disaster.txt"
+            label_file_path = os.path.join(labels_path, label_filename)
+
+            if os.path.exists(label_file_path):
+                with open(label_file_path, 'r') as f:
+                    for line in f:
+                        parts = line.strip().split()
+                        if len(parts) > 1:
+                            level = int(parts[0]) # Assuming level is the class ID
+                            coords_normalized = np.array([float(x) for x in parts[1:]]).reshape(-1, 2)
+                            coords_denormalized = (coords_normalized * np.array([width, height])).astype(np.int32)
+                            color_rgb = damage_color_map.get(level, [0, 0, 0]) # Default to black if level not found
+                            color = color_rgb[::-1] # Convert RGB to BGR
+                            cv2.fillPoly(gt_mask_colored, [coords_denormalized], color)
+                    
+            output_path_gt = os.path.join(output_dir, f"{image_id}_gt_mask.png")
+            cv2.imwrite(output_path_gt, gt_mask_colored)
+            print(f"Saved ground truth mask to: {output_path_gt}")
+
+            # Create prediction mask (colored, black background) with all buildings
+            prediction_mask_colored = np.zeros((height, width, 3), dtype=np.uint8)
+            for i, (bbox_pred, prediction, predicted_mask_cropped) in enumerate(building_results):
+                x_min_pred, y_min_pred, x_max_pred, y_max_pred = bbox_pred
+                resized_mask = cv2.resize(predicted_mask_cropped, (int(x_max_pred - x_min_pred), int(y_max_pred - y_min_pred)), interpolation=cv2.INTER_NEAREST)
+
+                predicted_level = damage_label_map.get(prediction.lower(), 0)
+                color_rgb = damage_color_map.get(predicted_level, [0, 0, 0])
+                color = color_rgb[::-1] # Convert RGB to BGR
+
+                # Place the colored mask onto the black background
+                prediction_mask_colored[y_min_pred:y_max_pred, x_min_pred:x_max_pred][resized_mask > 0] = color
+
+            output_path_pred = os.path.join(output_dir, f"{image_id}_pred.png")
+            cv2.imwrite(output_path_pred, prediction_mask_colored)
+            print(f"Saved predicted masks to: {output_path_pred}")
+
+        else:
+            print(f"Warning: Could not find image file for {image_id}")
+
 
 def main_classification(base_path="geotiffs/tier1"):
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
@@ -406,18 +495,30 @@ if __name__ == "__main__":
     import argparse
 
     parser = argparse.ArgumentParser(description="Building Damage Assessment")
-    parser.add_argument('--base_path', type=str, default="datasets/yolo_dataset/images",
+    parser.add_argument('--base_path', type=str, default="datasets/classification",
                         help="Base path for data")
-    parser.add_argument('--mode', choices=['train','predict'], default='predict',
-                        help="Mode: train or predict")
+    parser.add_argument('--mode', choices=['train','predict', 'visualize_masks'], default='predict',
+                        help="Mode: train, predict, or visualize_masks")
     parser.add_argument('--model_path', type=str, default="best_twin_vit.pth",
                         help="Path to classification model weights")
     parser.add_argument('--yolo_weights_path', type=str, default="instance_segmentation/l_seg/weights/best.pt",
                         help="Path to YOLO segmentation model weights")
+    parser.add_argument('--results_path', type=str, default="predictions_masks.pkl",
+                        help="Path to save/load prediction results with masks")
 
     args = parser.parse_args()
 
     if args.mode == 'train':
         main_classification(args.base_path)
     elif args.mode == 'predict':
-        predict(args.base_path, args.yolo_weights_path, args.model_path)
+        results = predict(args.base_path, args.yolo_weights_path, args.model_path)
+        with open(args.results_path, 'wb') as f:
+            pickle.dump(results, f)
+        print(f"Predictions with masks saved to: {args.results_path}")
+    elif args.mode == 'visualize_masks':
+        try:
+            with open(args.results_path, 'rb') as f:
+                results = pickle.load(f)
+            visualize_masks(args.base_path, results)
+        except FileNotFoundError:
+            print(f"Error: Results file not found at {args.results_path}. Run prediction first.")

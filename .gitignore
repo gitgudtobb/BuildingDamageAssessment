@@ -28,3 +28,6 @@
 /yolo11l-seg.pt
 /yolo11n.pt
 best_twin_vit.pth
+/datasets/
+/visualize_preds
+predictions_masks.pkl
