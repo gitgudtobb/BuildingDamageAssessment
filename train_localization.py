@@ -3,10 +3,10 @@ import random
 import numpy as np
 import argparse
 import time
-import torch # type: ignore
-import torch.optim as optim # type: ignore
-from torch.utils.data import Dataset, DataLoader # type: ignore
-from torch.utils.tensorboard import SummaryWriter # type: ignore
+import torch
+import torch.optim as optim
+from torch.utils.data import Dataset, DataLoader
+from torch.utils.tensorboard import SummaryWriter
 from localization_model import LocalizationModel, combined_loss
 from augmentations import load_image, load_mask, apply_transforms
 from torch_ema import ExponentialMovingAverage
