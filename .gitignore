@@ -31,3 +31,5 @@ best_twin_vit.pth
 /datasets/
 /visualize_preds
 predictions_masks.pkl
+/predictions/
+best_resnet34_localization.pth
