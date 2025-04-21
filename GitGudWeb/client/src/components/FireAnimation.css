@@ -1,0 +1,82 @@
+/* Ateş animasyonu için CSS */
+.fire-container {
+  position: fixed;
+  bottom: 0;
+  left: 0;
+  width: 100%;
+  height: 300px;
+  z-index: 1;
+  pointer-events: none;
+  overflow: visible;
+}
+
+.flame-wrapper {
+  position: absolute;
+  bottom: -20px;
+  transform-origin: center bottom;
+  animation: flameFloat 3s ease-in-out infinite;
+}
+
+.flame {
+  filter: drop-shadow(0 0 15px rgba(255, 100, 0, 0.7));
+  transform-origin: center bottom;
+  opacity: 0.85;
+}
+
+/* Alev katmanları */
+.flame-outer {
+  fill: #FF4500; /* Kırmızı-turuncu */
+  animation: flameFlicker 2s ease-out infinite alternate;
+  opacity: 0.9;
+}
+
+.flame-middle {
+  fill: #FF7F00; /* Turuncu */
+  animation: flameFlicker 2.5s ease-out infinite alternate;
+  opacity: 0.85;
+}
+
+.flame-inner {
+  fill: #FFD700; /* Altın sarısı */
+  animation: flameFlicker 1.5s ease-out infinite alternate;
+  opacity: 0.8;
+}
+
+.flame-core {
+  fill: #FFFACD; /* Açık sarı/beyaz */
+  animation: flameFlicker 1s ease-out infinite alternate;
+  opacity: 0.75;
+}
+
+/* Animasyonlar */
+@keyframes flameFloat {
+  0%, 100% {
+    transform: translateY(0) scale(1);
+  }
+  50% {
+    transform: translateY(-15px) scale(1.05);
+  }
+}
+
+@keyframes flameFlicker {
+  0% {
+    opacity: 0.9;
+    transform: scaleX(1) scaleY(1);
+  }
+  25% {
+    opacity: 0.8;
+    transform: scaleX(1.01) scaleY(0.99);
+  }
+  50% {
+    opacity: 1;
+    transform: scaleX(0.99) scaleY(1.01);
+  }
+  75% {
+    opacity: 0.9;
+    transform: scaleX(1.01) scaleY(0.99);
+  }
+  100% {
+    opacity: 1;
+    transform: scaleX(1) scaleY(1);
+  }
+}

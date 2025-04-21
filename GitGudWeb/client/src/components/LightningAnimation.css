@@ -1,0 +1,105 @@
+/* Yu0131ldu0131ru0131m animasyonu iu00e7in CSS */
+.lightning-container {
+  position: fixed;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  z-index: 0;
+  pointer-events: none;
+  overflow: hidden;
+}
+
+.lightning {
+  position: absolute;
+  top: 0;
+  width: 4px;
+  height: 0;
+  background: linear-gradient(
+    to bottom,
+    rgba(255, 255, 255, 0.2) 0%,
+    rgba(255, 255, 255, 0.95) 40%,
+    rgba(255, 255, 255, 1) 50%,
+    rgba(255, 255, 255, 0.95) 60%,
+    rgba(255, 255, 255, 0.2) 100%
+  );
+  box-shadow: 
+    0 0 10px #fff,
+    0 0 20px #fff,
+    0 0 30px #fff,
+    0 0 50px rgba(0, 247, 255, 0.8),
+    0 0 90px rgba(0, 247, 255, 0.6),
+    0 0 100px rgba(0, 247, 255, 0.5),
+    0 0 120px rgba(0, 247, 255, 0.4),
+    0 0 180px rgba(0, 247, 255, 0.3);
+  opacity: 0;
+  transform-origin: top;
+  transform: scaleY(0);
+}
+
+.lightning-flash {
+  position: fixed;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  background-color: rgba(255, 255, 255, 0);
+  z-index: 0;
+  pointer-events: none;
+}
+
+@keyframes lightning-flash {
+  0% {
+    background-color: rgba(255, 255, 255, 0);
+  }
+  10% {
+    background-color: rgba(255, 255, 255, 0.3);
+  }
+  11% {
+    background-color: rgba(255, 255, 255, 0);
+  }
+  14% {
+    background-color: rgba(255, 255, 255, 0.2);
+  }
+  15% {
+    background-color: rgba(255, 255, 255, 0.05);
+  }
+  16% {
+    background-color: rgba(255, 255, 255, 0.1);
+  }
+  17% {
+    background-color: rgba(255, 255, 255, 0);
+  }
+  100% {
+    background-color: rgba(255, 255, 255, 0);
+  }
+}
+
+@keyframes lightning-strike {
+  0% {
+    opacity: 0;
+    transform: scaleY(0);
+  }
+  10% {
+    opacity: 1;
+    transform: scaleY(1);
+  }
+  20% {
+    opacity: 0.8;
+  }
+  21% {
+    opacity: 0;
+  }
+  25% {
+    opacity: 0.6;
+    transform: scaleY(1);
+  }
+  26% {
+    opacity: 0;
+    transform: scaleY(0);
+  }
+  100% {
+    opacity: 0;
+    transform: scaleY(0);
+  }
+}

@@ -1,0 +1,46 @@
+{
+  "name": "client",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build",
+    "lint": "eslint . --ext js,jsx --report-unused-disable-directives --max-warnings 0",
+    "preview": "vite preview"
+  },
+  "dependencies": {
+    "@auth0/auth0-react": "^2.3.0",
+    "@emotion/react": "^11.14.0",
+    "@emotion/styled": "^11.14.0",
+    "@mui/icons-material": "^6.4.6",
+    "@mui/lab": "^6.0.0-beta.29",
+    "@mui/material": "^6.4.6",
+    "@mui/x-date-pickers": "^7.27.1",
+    "date-fns": "^4.1.0",
+    "dayjs": "^1.11.13",
+    "framer-motion": "^12.4.2",
+    "html2canvas": "^1.4.1",
+    "leaflet": "^1.9.4",
+    "leaflet-draw": "^1.0.4",
+    "pica": "^9.0.1",
+    "pixelmatch": "^6.0.0",
+    "react": "^18.2.0",
+    "react-datepicker": "^8.1.0",
+    "react-dom": "^18.2.0",
+    "react-dropzone": "^14.3.8",
+    "react-leaflet": "^4.2.1",
+    "react-router-dom": "^7.2.0"
+  },
+  "devDependencies": {
+    "@types/react": "^18.2.43",
+    "@types/react-dom": "^18.2.17",
+    "@vitejs/plugin-react": "^4.2.1",
+    "esbuild": "^0.25.1",
+    "eslint": "^8.55.0",
+    "eslint-plugin-react": "^7.33.2",
+    "eslint-plugin-react-hooks": "^4.6.0",
+    "eslint-plugin-react-refresh": "^0.4.5",
+    "vite": "^5.0.8"
+  }
+}

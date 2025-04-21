@@ -1,0 +1,47 @@
+/* Duman animasyonu iu00e7in CSS */
+.smoke-container {
+  position: fixed;
+  bottom: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  z-index: 0;
+  pointer-events: none;
+  overflow: hidden;
+}
+
+.smoke {
+  position: absolute;
+  bottom: 0;
+  background: radial-gradient(
+    circle at center,
+    rgba(50, 50, 50, 0.3) 0%,
+    rgba(30, 30, 30, 0.1) 70%,
+    rgba(20, 20, 20, 0) 100%
+  );
+  border-radius: 50%;
+  opacity: 0;
+  filter: blur(10px);
+  transform: translateY(0);
+  animation: smokeRise 8s ease-out infinite;
+}
+
+@keyframes smokeRise {
+  0% {
+    opacity: 0;
+    transform: translateY(0) scale(1);
+  }
+  10% {
+    opacity: 0.4;
+  }
+  40% {
+    opacity: 0.2;
+  }
+  60% {
+    opacity: 0.1;
+  }
+  100% {
+    opacity: 0;
+    transform: translateY(-300px) scale(3);
+  }
+}
