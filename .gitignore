@@ -22,7 +22,14 @@
 /yolo_building_localization/
 /BuildingDamageAssessment.code-workspace
 /geotiffs
-best_convnext_base_localization.pth
-best_twin_resnet.pth
-/predictions
+/best_convnext_base_localization.pth
+/best_twin_resnet.pth
+/instance_segmentation
+/yolo11l-seg.pt
+/yolo11n.pt
+best_twin_vit.pth
+/datasets/
+/visualize_preds
+predictions_masks.pkl
+/predictions/
 best_resnet34_localization.pth

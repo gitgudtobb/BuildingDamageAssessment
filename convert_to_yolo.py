@@ -27,6 +27,15 @@ def convert_to_yolo_seg_format(images_dir, labels_dir, output_dir):
     # Process all JSON files
     json_files = list(Path(labels_dir).glob('*.json'))
 
+    # Define a mapping for damage types to class IDs
+    damage_to_class_id = {
+        'no-damage': 0,
+        'minor-damage': 1,
+        'major-damage': 2,
+        'destroyed': 3,
+        'un-classified': 0  # Assuming 'un-classified' should map to 0
+    }
+
     for json_path in json_files:
         # Get corresponding image path
         image_name = json_path.name.replace('_disaster.json', '_disaster.png')
@@ -46,7 +55,7 @@ def convert_to_yolo_seg_format(images_dir, labels_dir, output_dir):
 
         # Prepare YOLO segmentation annotations
         yolo_seg_annotations = []
-        features = data['features'].get('xy', [])
+        features = data['features'].get('xy',)
 
         for feature in features:
             if 'wkt' not in feature:
@@ -70,8 +79,21 @@ def convert_to_yolo_seg_format(images_dir, labels_dir, output_dir):
                     normalized_y = y_coord / img_height
                     normalized_coords.extend([f"{normalized_x:.6f}", f"{normalized_y:.6f}"]) # Format and add x, then y
 
-                yolo_seg_line = f"0 {' '.join(normalized_coords)}" # Class ID 0 (building)
+                # Get the damage type and map it to a class ID
+                damage_type = feature.get('properties', {}).get('subtype') or \
+                              feature.get('properties', {}).get('damage_subtype') or \
+                              feature.get('properties', {}).get('damage') or \
+                              'no-damage' # Default to 'no-damage' if no info
+
+                class_id = damage_to_class_id.get(damage_type.lower(), 0) # Get class ID, default to 0 if not found
+
+                yolo_seg_line = f"{class_id} {' '.join(normalized_coords)}" # Use the extracted class ID
                 yolo_seg_annotations.append(yolo_seg_line)
+
+                #yolo_seg_line = f"0 {' '.join(normalized_coords)}" # Class ID 0 building
+                #yolo_seg_annotations.append(yolo_seg_line)
+
+                #yolo_seg_annotations.append(yolo_seg_line)
 
             except (KeyError, IndexError, ValueError) as e:
                 print(f"Skipping invalid feature in {json_path.name}: {str(e)}")
@@ -92,7 +114,7 @@ def convert_to_yolo_seg_format(images_dir, labels_dir, output_dir):
 
 def organize_yolo_dataset(data_dir):
     data_path = Path(data_dir)
-    
+
     # Create directories
     (data_path / 'images' / 'train').mkdir(parents=True, exist_ok=True)
     (data_path / 'images' / 'val').mkdir(parents=True, exist_ok=True)
@@ -101,42 +123,43 @@ def organize_yolo_dataset(data_dir):
 
     all_images = list((data_path / 'images').glob('*.png'))
     all_labels = list((data_path / 'labels').glob('*.txt'))
-    
-    
-    # Split while maintaining image-label correspondence
-    train_images, val_images = train_test_split(
-        all_images, test_size=0.2, random_state=42
+
+    # Get the base names of all images (without extension)
+    image_base_names = {img.stem for img in all_images}
+
+    # Split the base names into training and validation sets
+    train_base_names, val_base_names = train_test_split(
+        list(image_base_names), test_size=0.1, random_state=42
     )
-    train_labels, val_labels = train_test_split(
-        all_labels, test_size=0.2, random_state=42
-    )
-    # Move files function
-    def move_files(files, target_dir):
-        for f in files:
-            if f.exists():
-                shutil.move(str(f), str(target_dir / f.name))
 
-    # Move training files
-    move_files(train_images, data_path / 'images' / 'train')
-    move_files(train_labels, data_path / 'labels' / 'train')
+    # Move files to their respective train/val directories
+    for img_path in all_images:
+        base_name = img_path.stem
+        if base_name in train_base_names:
+            shutil.move(str(img_path), str(data_path / 'images' / 'train' / img_path.name))
+        elif base_name in val_base_names:
+            shutil.move(str(img_path), str(data_path / 'images' / 'val' / img_path.name))
 
-    # Move validation files
-    move_files(val_images, data_path / 'images' / 'val')
-    move_files(val_labels, data_path / 'labels' / 'val')
+    for label_path in all_labels:
+        base_name = label_path.stem
+        if base_name in train_base_names:
+            shutil.move(str(label_path), str(data_path / 'labels' / 'train' / label_path.name))
+        elif base_name in val_base_names:
+            shutil.move(str(label_path), str(data_path / 'labels' / 'val' / label_path.name))
 
-    print(f"Moved {len(train_images)} training and {len(val_images)} validation samples")
+    print(f"Organized dataset into training and validation sets.")
 
 def x():
-     # Define input directories
+    # Define input directories
     input_dirs = [
-        "geotiffs/tier3/images"
+        "geotiffs/tier1/images"
     ]
 
-    os.makedirs("datasets/yolo_dataset/images", exist_ok=True)
+    os.makedirs("datasets/classification/images", exist_ok=True)
     for input_dir in input_dirs:
         for tif_path in glob.glob(os.path.join(input_dir, "*.tif")):
-            if "post" in tif_path and  random.randint(1, 100) > 4:
-                continue
+            #if "post" in tif_path and  random.randint(1, 100) > 4:
+            #    continue
             try:
                 # Use imageio to read the TIFF file
                 arr = imageio.imread(tif_path)
@@ -148,7 +171,7 @@ def x():
                 # Create a PIL Image from the array
                 img = Image.fromarray(arr)
                 base_name = os.path.splitext(os.path.basename(tif_path))[0]
-                png_path = os.path.join("datasets/yolo_dataset/images", base_name + ".png")
+                png_path = os.path.join("datasets/classification/images", base_name + ".png")
                 img.save(png_path, "PNG")
                 print(f"Converted {tif_path} to {png_path}")
             except Exception as e:
@@ -156,7 +179,7 @@ def x():
 
 def main():
 
-    x()
+    #x()
 
     parser = argparse.ArgumentParser(description='Convert xView2 annotations to YOLO format')
     parser.add_argument('--images-dir', type=str, required=True,
@@ -165,19 +188,18 @@ def main():
                         help='Path to directory containing JSON annotations')
     parser.add_argument('--output-dir', type=str, required=True,
                         help='Output directory for YOLO-formatted dataset')
-    
+
     args = parser.parse_args()
-    
+
     convert_to_yolo_seg_format(
         Path(args.images_dir),
         Path(args.labels_dir),
         Path(args.output_dir)
     )
 
-    organize_yolo_dataset('datasets/yolo_dataset')
+    #organize_yolo_dataset('datasets/yolo_dataset')
 
 
 
 if __name__ == '__main__':
     main()
-

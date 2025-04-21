@@ -1,19 +1,21 @@
 import json
 import os
+import pickle
 import random
 import cv2
-from matplotlib import pyplot as plt # type: ignore
 import numpy as np
-import torch # type: ignore
-import torch.nn as nn # type: ignore
-from torch.utils.data import Dataset, DataLoader # type: ignore
-from torchvision import transforms, models # type: ignore
+import torch
+import torch.nn as nn
+from torch.utils.data import Dataset, DataLoader
+from torchvision import transforms
 from shapely.wkt import loads as wkt_loads
-from tqdm import tqdm # type: ignore
-from torchvision.models import  ResNet34_Weights # type: ignore
+from tqdm import tqdm
 from augmentations import load_image
+from PIL import Image as PILImage
+from ultralytics import YOLO
+from transformers import ViTModel
 
-# 1. Dataset Class with Localization
+# Dataset Class with Localization
 class BuildingDamageDataset(Dataset):
     def __init__(self, labels_path, images_path, transform=None):
         self.features = []
@@ -30,7 +32,7 @@ class BuildingDamageDataset(Dataset):
         print("Loading and categorizing features...")
         for root, _, files in os.walk(labels_path):
             for file in files:
-                if file.endswith('.json') and random.randint(0,100) < 10:
+                if file.endswith('.json'):
                     label_path = os.path.join(root, file)
                     with open(label_path) as f:
                         data = json.load(f)
@@ -43,10 +45,7 @@ class BuildingDamageDataset(Dataset):
                             if 'features' in data and 'xy' in data['features']:
                                 for feature in data['features']['xy']:
                                     properties = feature.get('properties', {})
-                                    subtype = properties.get('subtype',
-                                                               properties.get('damage_subtype',
-                                                                              properties.get('damage',
-                                                                                             'no-damage')))
+                                    subtype = properties.get('subtype',  'no-damage')
                                     feature_data = {
                                         'feature': feature,
                                         'pre_img_path': pre_img_path,
@@ -64,7 +63,7 @@ class BuildingDamageDataset(Dataset):
                                         un_classified_features.append(feature_data)
 
         # Undersample no-damage features
-        num_no_damage_to_keep = int(len(no_damage_features) * 0.1)
+        num_no_damage_to_keep = int(len(no_damage_features) * 0.2)
         self.features.extend(random.sample(no_damage_features, num_no_damage_to_keep))
         self.features.extend(minor_damage_features)
         self.features.extend(major_damage_features)
@@ -93,14 +92,11 @@ class BuildingDamageDataset(Dataset):
 
         # Load images
         pre_img = load_image(item['pre_img_path'])
-        post_img = load_image(item['pre_img_path'])
+        post_img = load_image(item['post_img_path'])
         if pre_img.dtype != np.uint8:
             pre_img = pre_img.astype(np.uint8)
         if post_img.dtype != np.uint8:
             post_img = post_img.astype(np.uint8)
-
-        #pre_img = cv2.cvtColor(cv2.imread(item['pre_img_path']), cv2.COLOR_BGR2RGB)
-        #post_img = cv2.cvtColor(cv2.imread(item['post_img_path']), cv2.COLOR_BGR2RGB)
 
         # Extract polygon coordinates
         polygon = wkt_loads(feature['wkt'])
@@ -130,33 +126,6 @@ class BuildingDamageDataset(Dataset):
         if self.transform:
             pre_crop = self.transform(pre_crop)
             post_crop = self.transform(post_crop)
-        
-        def to_display(img):
-            if isinstance(img, torch.Tensor):
-                img = img.cpu().numpy()
-                if img.shape[0] == 1:
-                    img = img.squeeze(0)
-                else:
-                    img = img.transpose(1, 2, 0)
-            return img
-        
-        '''pre_disp = to_display(pre_crop)
-        post_disp = to_display(post_crop)
-
-        # Visualize pre_crop and post_crop
-        plt.figure(figsize=(10, 5))
-
-        plt.subplot(1, 2, 1)
-        plt.imshow(pre_disp)
-        plt.title("Pre-crop")
-        plt.axis('off')
-
-        plt.subplot(1, 2, 2)
-        plt.imshow(post_disp)
-        plt.title("Post-crop")
-        plt.axis('off')
-
-        plt.show()'''
 
         return {'pre': pre_crop, 'post': post_crop}, torch.tensor(label)
 
@@ -175,58 +144,263 @@ class BuildingDamageDataset(Dataset):
                                         cv2.BORDER_CONSTANT, value=0)
         return crop
 
-# 2. Two-Stream ResNet34 Model
-class TwinResNet(nn.Module):
-    def __init__(self, num_classes=4, pretrained=False):
-        super(TwinResNet, self).__init__()
+# Two-Stream ViT Model
+class TwinViT(nn.Module):
+    def __init__(self, num_classes=4, pretrained=True):
+        super(TwinViT, self).__init__()
 
-        # Load pretrained models
-        self.pre_stream = models.resnet34(weights=ResNet34_Weights.DEFAULT)
-        self.post_stream = models.resnet34(weights=ResNet34_Weights.DEFAULT)
+        self.stream_pre = ViTModel.from_pretrained('google/vit-large-patch16-224')
+        self.stream_post = ViTModel.from_pretrained('google/vit-large-patch16-224')
 
-        # Custom pretrained weights
-        if not pretrained and os.path.exists("best_resnet34_localization.pth"):
-            try:
-                pre_weights = torch.load("best_resnet34_localization.pth")
-                post_weights = torch.load("best_resnet34_localization.pth")
-                self.pre_stream.load_state_dict(pre_weights)
-                self.post_stream.load_state_dict(post_weights)
-                print("Loaded custom pretrained weights")
-            except Exception as e:
-                print(f"Could not load pretrained weights: {e}")
-        else:
-            print("Using default pretrained weights")        
+        # Freeze ViT layers
+        for param in self.stream_pre.parameters():
+            param.requires_grad = False
+        for param in self.stream_post.parameters():
+            param.requires_grad = False
 
-        # Remove final layers
-        self.pre_stream = nn.Sequential(*list(self.pre_stream.children())[:-1])
-        self.post_stream = nn.Sequential(*list(self.post_stream.children())[:-1])
+        # Get the hidden size of the ViT model
+        hidden_size = self.stream_pre.config.hidden_size
 
         # Classification head
         self.classifier = nn.Sequential(
-            nn.Linear(512*2, 512),
+            nn.Linear(hidden_size * 2, 512),
             nn.ReLU(),
             nn.Dropout(0.3),
             nn.Linear(512, num_classes)
         )
 
     def forward(self, pre_img, post_img):
-        pre_features = self.pre_stream(pre_img)
-        post_features = self.post_stream(post_img)
+        outputs_pre = self.stream_pre(pre_img)
+        outputs_post = self.stream_post(post_img)
 
-        # Flatten features
-        pre_features = pre_features.view(pre_features.size(0), -1)
-        post_features = post_features.view(post_features.size(0), -1)
+        # Use the pooled output for classification
+        pre_features = outputs_pre.pooler_output
+        post_features = outputs_post.pooler_output
 
+        # Concatenate features
         combined = torch.cat((pre_features, post_features), dim=1)
         return self.classifier(combined)
 
-# 3. Training Setup
-def main(base_path="geotiffs/tier1"):
+def perform_instance_segmentation(image_path, weights_path="instance_segmentation/l_seg/weights/best.pt"):
+    model = YOLO(weights_path)
+    model.to(torch.device("cuda" if torch.cuda.is_available() else "cpu")) # Ensure model is on the correct device
+
+    # Perform inference
+    results = model(image_path)
+
+    # Iterate through the detected objects and yield cropped images, bounding boxes, and masks
+    for result in results:
+        if result.masks is not None:
+            masks = result.masks.xy  # Get the mask coordinates
+            boxes = result.boxes.xyxy.int()  # Get the bounding box coordinates
+            orig_img = PILImage.open(image_path).convert("RGB")
+            orig_img_np = np.array(orig_img)
+
+            for i, (mask_coords, bbox) in enumerate(zip(masks, boxes)):
+                # Convert mask coordinates to integers
+                mask = np.array(mask_coords, dtype=np.int32)
+
+                # Create a boolean mask for the current building
+                building_mask = np.zeros(orig_img_np.shape[:2], dtype=np.uint8)
+                cv2.fillPoly(building_mask, [mask], color=255)
+                bool_mask = building_mask > 0
+
+                # Extract the building instance using the mask
+                segmented_building_np = np.zeros_like(orig_img_np)
+                segmented_building_np[bool_mask] = orig_img_np[bool_mask]
+
+                # Crop the image to the bounding box to remove extra padding
+                x_min, y_min, x_max, y_max = bbox
+                cropped_building_np = segmented_building_np[y_min:y_max, x_min:x_max]
+                cropped_building_pil = PILImage.fromarray(cropped_building_np)
+
+                # Resize the predicted mask to the size of the cropped building
+                predicted_mask_cropped = building_mask[y_min:y_max, x_min:x_max]
+
+                yield cropped_building_pil, (x_min, y_min, x_max, y_max), predicted_mask_cropped
+
+def predict(base_path="datasets/classification",
+            yolo_weights_path="instance_segmentation/l_seg/weights/best.pt",
+            model_path="best_twin_vit.pth",
+            device=None):
+
+    if device is None:
+        device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+
+    # Load classification model
+    classification_model = TwinViT(num_classes=4).to(device)
+    try:
+        classification_model.load_state_dict(torch.load(model_path, map_location=device))
+        print(f"Loaded classification model weights from: {model_path}")
+    except FileNotFoundError:
+        print(f"Warning: Classification model weights not found at: {model_path}. Using randomly initialized weights.")
+    classification_model.eval()
+
+    transform = transforms.Compose([
+        transforms.Resize((224, 224)),
+        transforms.ToTensor(),
+        transforms.Normalize(mean=[0.485, 0.456, 0.406],
+                             std=[0.229, 0.224, 0.225])
+    ])
+
+    images_path = os.path.join(base_path, "images")
+    image_filenames = [f for f in os.listdir(images_path) if f.endswith(('.tif', '.png', '.jpg'))]
+    image_filenames.sort()
+
+    print("Starting prediction using instance segmentation with TwinViT...")
+
+    results = {} # Dictionary to store results per image
+
+    with torch.no_grad():
+        for filename in tqdm(image_filenames, desc="Processing images"):
+            if "_pre_disaster" in filename:
+                base_id = filename.replace("_pre_disaster", "").split('.')[0]
+                post_filename = f"{base_id}_post_disaster{os.path.splitext(filename)[1]}"
+                pre_image_path = os.path.join(images_path, filename)
+                post_image_path = os.path.join(images_path, post_filename)
+
+                if os.path.exists(post_image_path):
+                    pre_building_data = list(perform_instance_segmentation(pre_image_path, yolo_weights_path))
+                    post_building_data = list(perform_instance_segmentation(post_image_path, yolo_weights_path))
+
+                    print(f"Processing pair: {filename} and {post_filename}")
+                    print(f"  Detected {len(pre_building_data)} buildings in pre-disaster image.")
+                    print(f"  Detected {len(post_building_data)} buildings in post-disaster image.")
+
+                    predictions = []
+                    bounding_boxes = []
+                    predicted_masks = []
+
+                    num_buildings = min(len(pre_building_data), len(post_building_data))
+                    for i in range(num_buildings):
+                        try:
+                            pre_crop, _, _ = pre_building_data[i]
+                            post_crop, bbox, predicted_mask = post_building_data[i]
+
+                            # Preprocess for classification
+                            pre_tensor = transform(pre_crop).unsqueeze(0).to(device)
+                            post_tensor = transform(post_crop).unsqueeze(0).to(device)
+
+                            # Predict damage
+                            outputs = classification_model(pre_tensor, post_tensor)
+                            _, predicted = torch.max(outputs, 1)
+                            damage_level = {0: 'no-damage', 1: 'minor-damage', 2: 'major-damage', 3: 'destroyed'}[predicted.item()]
+                            #print(f"  Building {i+1}: Predicted damage - {damage_level}, Bounding Box: {bbox}")
+                            predictions.append(damage_level)
+                            bounding_boxes.append(bbox)
+                            predicted_masks.append(predicted_mask)
+                        except IndexError:
+                            #print(f"Warning: Index out of bounds for building {i+1}. Skipping.")
+                            continue
+
+                    results[post_filename] = list(zip(bounding_boxes, predictions, predicted_masks)) # Store bounding boxes, predictions, and predicted masks
+                else:
+                    print(f"Warning: Post-disaster image not found for {filename}")
+    return results
+
+def visualize_masks(base_path="geotiffs/tier1", results=None, labels=True):
+    if results is None:
+        print("No results to visualize.")
+        return
+
+    images_path = os.path.join(base_path, "images")
+    labels_path = os.path.join(base_path, "labels")
+    output_dir = "visualize_preds"
+    os.makedirs(output_dir, exist_ok=True)
+
+    # Define color map for damage levels
+    damage_color_map = {
+        0: [0, 255, 0],     # Green for no damage
+        1: [255, 255, 0],   # Yellow for minor damage
+        2: [255, 165, 0],   # Orange for major damage
+        3: [255, 0, 0]      # Red for destroyed
+    }
+    damage_label_map = {'no-damage': 0, 'minor-damage': 1, 'major-damage': 2, 'destroyed': 3}
+
+
+    for post_filename, building_results in results.items():
+        image_id = post_filename.replace("_post_disaster" + os.path.splitext(post_filename)[1], "")
+        post_image_path = os.path.join(images_path, post_filename)
+
+        if os.path.exists(post_image_path):
+            original_image = cv2.imread(post_image_path)
+            height, width, _ = original_image.shape
+
+            # Create ground truth mask
+            gt_mask_colored = np.zeros((height, width, 3), dtype=np.uint8)
+            label_filename = f"{image_id}_post_disaster.txt"
+            label_file_path = os.path.join(labels_path, label_filename)
+
+            if os.path.exists(label_file_path):
+                with open(label_file_path, 'r') as f:
+                    for line in f:
+                        parts = line.strip().split()
+                        if len(parts) > 1:
+                            level = int(parts[0])
+                            coords_normalized = np.array([float(x) for x in parts[1:]]).reshape(-1, 2)
+                            coords_denormalized = (coords_normalized * np.array([width, height])).astype(np.int32)
+                            color_rgb = damage_color_map.get(level, [0, 0, 0]) # Default to black if level not found
+                            color = color_rgb[::-1] # Convert RGB to BGR
+                            cv2.fillPoly(gt_mask_colored, [coords_denormalized], color)
+                    
+            output_path_gt = os.path.join(output_dir, f"{image_id}_gt_mask.png")
+            if labels:
+                cv2.imwrite(output_path_gt, gt_mask_colored)
+
+            predictions_overlay = original_image.copy()
+
+            prediction_counts = {0: 0, 1: 0, 2: 0, 3: 0}
+
+            for i, (bbox_pred, prediction, predicted_mask_cropped) in enumerate(building_results):
+                x_min_pred = max(0, int(bbox_pred[0]))
+                y_min_pred = max(0, int(bbox_pred[1]))
+                x_max_pred = min(width, int(bbox_pred[2]))
+                y_max_pred = min(height, int(bbox_pred[3]))
+
+                resized_mask = cv2.resize(predicted_mask_cropped, (int(x_max_pred - x_min_pred), int(y_max_pred - y_min_pred)), interpolation=cv2.INTER_NEAREST)
+
+                predicted_level = damage_label_map.get(prediction.lower(), 0)
+
+                if predicted_level in prediction_counts:
+                    prediction_counts[predicted_level] += 1
+                    
+                color_rgb = damage_color_map.get(predicted_level, [0, 0, 0])
+                color = color_rgb[::-1]  # Convert RGB to BGR
+
+                roi = predictions_overlay[y_min_pred:y_max_pred, x_min_pred:x_max_pred]
+                # Ensure mask is boolean for indexing
+                mask_boolean = resized_mask > 0
+
+                alpha = 0.7 # Transparency factor
+                roi[mask_boolean] = cv2.addWeighted(roi[mask_boolean], 1 - alpha, np.full_like(roi[mask_boolean], color), alpha, 0)
+
+            
+            counts_output_filename = f"{image_id}_pred_counts.txt"
+            counts_output_filepath = os.path.join(output_dir, counts_output_filename)
+            try:
+                with open(counts_output_filepath, 'w') as f_counts:
+                    # Ensure levels 0, 1, 2, 3 are written even if count is 0
+                    for level in sorted(prediction_counts.keys()):
+                        f_counts.write(f"Level {level}: {prediction_counts[level]}\n")
+            except IOError as e:
+                print(f"ERROR: Could not write counts file {counts_output_filepath}: {e}")
+
+
+            output_path_pred = os.path.join(output_dir, f"{image_id}_pred.png")
+            cv2.imwrite(output_path_pred, predictions_overlay)
+
+        else:
+            print(f"Warning: Could not find image file for {image_id}")
+
+
+def main_classification(base_path="geotiffs/tier1"):
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     print(f"Using device: {device}")
 
     # Paths
-    images_path = os.path.join(base_path, "images")
+    base_path="geotiffs/tier1"
+    base_path_yolo = "datasets/classification"   # for yolo
+    images_path  = os.path.join(base_path_yolo, "images")
     labels_path = os.path.join(base_path, "labels")
 
     # Ensure paths exist
@@ -236,11 +410,14 @@ def main(base_path="geotiffs/tier1"):
 
     transform = transforms.Compose([
         transforms.ToPILImage(),
-        transforms.RandomHorizontalFlip(),
-        transforms.RandomRotation(15),
+        transforms.RandomHorizontalFlip(p=0.4),
+        transforms.RandomVerticalFlip(p=0.4), 
+        transforms.RandomRotation(degrees=30, fill=0),
+        transforms.ColorJitter(brightness=0.2, contrast=0.2, saturation=0, hue=0),
+        transforms.ColorJitter(hue=0.2, saturation=0.3, brightness=0, contrast=0),
         transforms.ToTensor(),
-        transforms.Normalize(mean=[0.485, 0.456, 0.406],
-                             std=[0.229, 0.224, 0.225])
+        transforms.Normalize(mean=[0.334, 0.347, 0.262], 
+                            std=[0.174, 0.143, 0.134]),
     ])
 
     # Dataset & Loader
@@ -262,7 +439,7 @@ def main(base_path="geotiffs/tier1"):
     val_loader = DataLoader(val_dataset, batch_size=16, shuffle=False, num_workers=4)
 
     # Model
-    model = TwinResNet(num_classes=4).to(device)
+    model = TwinViT(num_classes=4).to(device)
 
     # Loss and Optimizer
     criterion = nn.CrossEntropyLoss()
@@ -270,7 +447,7 @@ def main(base_path="geotiffs/tier1"):
     scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(optimizer, 'min', patience=2)
 
     # Training Loop
-    num_epochs = 20
+    num_epochs = 150
     best_acc = 0.0
 
     for epoch in range(num_epochs):
@@ -335,74 +512,39 @@ def main(base_path="geotiffs/tier1"):
         # Save best model
         if val_acc > best_acc:
             best_acc = val_acc
-            torch.save(model.state_dict(), "best_twin_resnet.pth")
+            torch.save(model.state_dict(), "best_twin_vit.pth")
             print(f"  Saved best model with val acc: {best_acc:.2f}%")
 
     print("Training Complete")
     print(f"Best validation accuracy: {best_acc:.2f}%")
 
-
-
-# 4. Inference
-def predict(base_path="geotiffs/tier1", model_path="best_twin_resnet.pth", device=None):
-    if device is None:
-        device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-
-    # Paths
-    images_path = os.path.join(base_path, "images")
-    labels_path = os.path.join(base_path, "labels")
-
-    # Load model
-    model = TwinResNet(num_classes=4).to(device)
-    model.load_state_dict(torch.load(model_path, map_location=device))
-    model.eval()
-
-    transform = transforms.Compose([
-        transforms.ToTensor(),
-        transforms.Normalize(mean=[0.485, 0.456, 0.406],
-                             std=[0.229, 0.224, 0.225])
-    ])
-
-    dataset = BuildingDamageDataset(labels_path, images_path, transform)
-    loader = DataLoader(dataset, batch_size=16, shuffle=False)
-
-    predictions = []
-    labels = []
-
-    with torch.no_grad():
-        for batch in tqdm(loader, desc="Inference"):
-            inputs, batch_labels = batch
-            pre = inputs['pre'].float().to(device)
-            post = inputs['post'].float().to(device)
-
-            outputs = model(pre, post)
-            _, preds = torch.max(outputs, 1)
-            predictions.extend(preds.cpu().numpy())
-            labels.extend(batch_labels.cpu().numpy())
-
-    categories = {0: 'no-damage', 1: 'minor-damage', 2: 'major-damage', 3: 'destroyed'}
-    result = [categories[p] for p in predictions]
-
-    accuracy = sum(p == l for p, l in zip(predictions, labels)) / len(predictions) if predictions else 0
-    print(f"Inference completed with accuracy: {accuracy:.2f}")
-
-    return result
-
 if __name__ == "__main__":
     import argparse
 
     parser = argparse.ArgumentParser(description="Building Damage Assessment")
-    parser.add_argument('--base_path', type=str, default="geotiffs/tier1",
+    parser.add_argument('--base_path', type=str, default="datasets/classification",
                         help="Base path for data")
-    parser.add_argument('--mode', choices=['train', 'predict'], default='train',
-                        help="Mode: train or predict")
-    parser.add_argument('--model_path', type=str, default="best_twin_resnet.pth",
-                        help="Path to model weights")
+    parser.add_argument('--mode', choices=['train','predict'], default='train',
+                        help="Mode: train, predict")
+    parser.add_argument('--model_path', type=str, default="best_twin_vit.pth",
+                        help="Path to classification model weights")
+    parser.add_argument('--yolo_weights_path', type=str, default="instance_segmentation/l_seg/weights/best.pt",
+                        help="Path to YOLO segmentation model weights")
+    parser.add_argument('--results_path', type=str, default="prediction_masks.pkl",
+                        help="Path to save/load prediction results with masks")
 
     args = parser.parse_args()
 
     if args.mode == 'train':
-        main(args.base_path)
-    else:
-        predictions = predict(args.base_path, args.model_path)
-        print(f"Predictions distribution: {dict(zip(*np.unique(predictions, return_counts=True)))}")
+        main_classification(args.base_path)
+    elif args.mode == 'predict':
+        results = predict(args.base_path, args.yolo_weights_path, args.model_path)
+        with open(args.results_path, 'wb') as f:
+            pickle.dump(results, f)
+        print(f"Predictions with masks saved to: {args.results_path}")
+        try:
+            with open(args.results_path, 'rb') as f:
+                results = pickle.load(f)
+            visualize_masks(args.base_path, results, True)
+        except FileNotFoundError:
+            print(f"Error: Results file not found at {args.results_path}. Run prediction first.")
