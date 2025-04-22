@@ -44,7 +44,8 @@ class TwinViT(nn.Module):
 
 def perform_instance_segmentation(image_path, weights_path="best.pt"):
     model = YOLO(weights_path)
-    model.to(torch.device("cuda" if torch.cuda.is_available() else "cpu"))
+    #model.to('cpu')  # Force CPU execution
+    model.to(torch.device('cuda' if torch.cuda.is_available() else 'cpu'))
 
     results = model(image_path)
 
@@ -160,9 +161,13 @@ def visualize_masks(base_path, results, labels=True):
 def predict(base_path="classification",
             yolo_weights_path="best.pt",
             model_path="best_twin_vit.pth",
-            results_path="prediction_masks.pkl"):
-    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-
+            results_path="prediction_masks.pkl",
+            id_list=None):
+    
+    device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+    
+    #device = torch.device('cpu')
+    
     # Load classification model
     classification_model = TwinViT(num_classes=4).to(device)
     try:
@@ -186,7 +191,12 @@ def predict(base_path="classification",
     images_path = os.path.join(base_path, "images")
     image_filenames = [f for f in os.listdir(images_path) if f.endswith(('.tif', '.png', '.jpg'))]
     image_filenames.sort()
+    
+    if id_list is not None:
+        image_filenames = [f for f in image_filenames if any(f.startswith(id_) for id_ in id_list)]
 
+    print(image_filenames)
+    
     print("Starting prediction using instance segmentation with TwinViT...")
     results = {}
 

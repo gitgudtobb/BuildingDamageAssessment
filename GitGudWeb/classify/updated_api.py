@@ -75,7 +75,8 @@ def analyze_damage():
             base_path=DATASET_DIR,
             yolo_weights_path=YOLO_WEIGHTS_PATH,
             model_path=MODEL_PATH,
-            results_path=RESULTS_PATH
+            results_path=RESULTS_PATH,
+            id_list=[image_id]
         )
 
         # Görselleştirme yap
