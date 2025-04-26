@@ -1,4 +1,7 @@
-/node_modules
+/server/node_modules
+/client/node_modules
 .pth
 .pt
 .pkl
+/classify/classification
+best.pt

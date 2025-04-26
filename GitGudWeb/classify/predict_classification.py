@@ -9,15 +9,14 @@ from PIL import Image as PILImage
 from ultralytics import YOLO
 from transformers import ViTModel
 from tqdm import tqdm
-
+from scipy.optimize import linear_sum_assignment
 
 class TwinViT(nn.Module):
     def __init__(self, num_classes=4, pretrained=True):
         super(TwinViT, self).__init__()
 
-        # Use large ViT model
-        self.stream_pre = ViTModel.from_pretrained('google/vit-large-patch16-224')
-        self.stream_post = ViTModel.from_pretrained('google/vit-large-patch16-224')
+        self.stream_pre = ViTModel.from_pretrained('google/vit-base-patch16-224')
+        self.stream_post = ViTModel.from_pretrained('google/vit-base-patch16-224')
 
         # Freeze ViT layers
         for param in self.stream_pre.parameters():
@@ -28,10 +27,28 @@ class TwinViT(nn.Module):
         # Classification head
         hidden_size = self.stream_pre.config.hidden_size
         self.classifier = nn.Sequential(
-            nn.Linear(hidden_size * 2, 512),
-            nn.ReLU(),
-            nn.Dropout(0.3),
-            nn.Linear(512, num_classes))
+            nn.Linear(hidden_size*2, 1024),
+            nn.BatchNorm1d(1024),
+            nn.ReLU(inplace=True),
+            nn.Dropout(0.4),
+
+            nn.Linear(1024, 512),
+            nn.BatchNorm1d(512),
+            nn.ReLU(inplace=True),
+            nn.Dropout(0.4),
+
+            nn.Linear(512, 256),
+            nn.BatchNorm1d(256),
+            nn.ReLU(inplace=True),
+            nn.Dropout(0.4),
+
+            nn.Linear(256, 128),
+            nn.BatchNorm1d(128),
+            nn.ReLU(inplace=True),
+            nn.Dropout(0.4),
+
+            nn.Linear(128, num_classes)
+        )
 
     def forward(self, pre_img, post_img):
         outputs_pre = self.stream_pre(pre_img)
@@ -75,7 +92,6 @@ def perform_instance_segmentation(image_path, weights_path="best.pt"):
 
 def visualize_masks(base_path, results, labels=True):
     if results is None:
-        print("No results to visualize.")
         return
 
     images_path = os.path.join(base_path, "images")
@@ -124,28 +140,58 @@ def visualize_masks(base_path, results, labels=True):
             predictions_overlay = original_image.copy()
             prediction_counts = {0: 0, 1: 0, 2: 0, 3: 0}
 
-            for i, (bbox_pred, prediction, predicted_mask_cropped) in enumerate(building_results):
-                x_min_pred = max(0, int(bbox_pred[0]))
-                y_min_pred = max(0, int(bbox_pred[1]))
-                x_max_pred = min(width, int(bbox_pred[2]))
-                y_max_pred = min(height, int(bbox_pred[3]))
+            for bbox_pred, prediction, pre_mask in building_results:
+                if prediction != 'destroyed':
+                    continue
 
-                resized_mask = cv2.resize(predicted_mask_cropped,
-                                          (int(x_max_pred - x_min_pred),
-                                           int(y_max_pred - y_min_pred)),
-                                          interpolation=cv2.INTER_NEAREST)
+                x0, y0, x1, y1 = map(int, bbox_pred)
+                w, h = x1 - x0, y1 - y0
+                if w <= 0 or h <= 0:
+                    continue
 
-                predicted_level = damage_label_map.get(prediction.lower(), 0)
-                prediction_counts[predicted_level] += 1
+                if pre_mask is None or pre_mask.size == 0:
+                    continue
+                resized = cv2.resize(pre_mask, (w, h), interpolation=cv2.INTER_NEAREST)
+                mask_boolean = resized > 0
+                if not mask_boolean.any():
+                    continue
 
-                color_rgb = damage_color_map.get(predicted_level, [0, 0, 0])
-                color = color_rgb[::-1]
+                prediction_counts[3] += 1
 
-                roi = predictions_overlay[y_min_pred:y_max_pred, x_min_pred:x_max_pred]
-                mask_boolean = resized_mask > 0
-                alpha = 0.7  # Transparency factor
-                roi[mask_boolean] = cv2.addWeighted(roi[mask_boolean], 1 - alpha,
-                                                    np.full_like(roi[mask_boolean], color), alpha, 0)
+                roi = predictions_overlay[y0:y1, x0:x1]
+                alpha = 0.7
+                red = np.array([0, 0, 255], dtype=np.uint8)
+                overlay = np.full_like(roi, red)
+                roi[mask_boolean] = cv2.addWeighted(
+                    roi[mask_boolean], 1 - alpha,
+                    overlay[mask_boolean], alpha, 0
+                )
+
+            for bbox_pred, prediction, post_mask in building_results:
+                if prediction == 'destroyed':
+                    continue
+
+                x0, y0, x1, y1 = map(int, bbox_pred)
+                w, h = x1 - x0, y1 - y0
+                if w <= 0 or h <= 0 or post_mask is None or post_mask.size == 0:
+                    continue
+
+                resized = cv2.resize(post_mask, (w, h), interpolation=cv2.INTER_NEAREST)
+                mask_boolean = resized > 0
+                if not mask_boolean.any():
+                    continue
+
+                lvl = damage_label_map[prediction.lower()]
+                prediction_counts[lvl] += 1
+
+                color_bgr = damage_color_map[lvl][::-1]
+                roi = predictions_overlay[y0:y1, x0:x1]
+                alpha = 0.7
+                overlay = np.full_like(roi, color_bgr)
+                roi[mask_boolean] = cv2.addWeighted(
+                    roi[mask_boolean], 1 - alpha,
+                    overlay[mask_boolean], alpha, 0
+                )
 
             # Save prediction counts
             counts_output_filepath = os.path.join(output_dir, f"{image_id}_pred_counts.txt")
@@ -157,6 +203,38 @@ def visualize_masks(base_path, results, labels=True):
             output_path_pred = os.path.join(output_dir, f"{image_id}_pred.png")
             cv2.imwrite(output_path_pred, predictions_overlay)
 
+
+def mask_iou(mask1: np.ndarray, mask2: np.ndarray) -> float:
+    if mask1 is None or mask2 is None:
+        return 0.0
+    if mask1.shape != mask2.shape:
+        min_h = min(mask1.shape[0], mask2.shape[0])
+        min_w = min(mask1.shape[1], mask2.shape[1])
+        mask1 = mask1[:min_h, :min_w]
+        mask2 = mask2[:min_h, :min_w]
+    inter = np.logical_and(mask1, mask2).sum()
+    union = np.logical_or(mask1, mask2).sum()
+    return inter / union if union > 0 else 0.0
+
+
+def match_instances(pre_instances, post_instances, iou_threshold=0.3):
+    N, M = len(pre_instances), len(post_instances)
+    cost = np.zeros((N, M), dtype=np.float32)
+
+    # Build cost matrix as negative IoU (to minimize)
+    for i, (_, _, pre_mask) in enumerate(pre_instances):
+        pre_bool = pre_mask > 0
+        for j, (_, _, post_mask) in enumerate(post_instances):
+            post_bool = post_mask > 0
+            cost[i, j] = -mask_iou(pre_bool, post_bool)
+
+    # Solve assignment problem
+    row_ind, col_ind = linear_sum_assignment(cost)
+    matches = []
+    for i, j in zip(row_ind, col_ind):
+        if -cost[i, j] >= iou_threshold:
+            matches.append((i, j))
+    return matches
 
 def predict(base_path="classification",
             yolo_weights_path="best.pt",
@@ -201,44 +279,72 @@ def predict(base_path="classification",
     results = {}
 
     with torch.no_grad():
-        for filename in tqdm(image_filenames, desc="Processing images"):
-            if "_pre_disaster" in filename:
-                base_id = filename.replace("_pre_disaster", "").split('.')[0]
-                post_filename = f"{base_id}_post_disaster{os.path.splitext(filename)[1]}"
-                pre_image_path = os.path.join(images_path, filename)
-                post_image_path = os.path.join(images_path, post_filename)
+        for pre_filename in tqdm(image_filenames, desc="Processing images"):
+            base_id = pre_filename.replace("_pre_disaster", "").split('.')[0]
+            post_filename = f"{base_id}_post_disaster{os.path.splitext(pre_filename)[1]}"
+            pre_path = os.path.join(images_path, pre_filename)
+            post_path = os.path.join(images_path, post_filename)
 
-                if os.path.exists(post_image_path):
-                    pre_buildings = list(perform_instance_segmentation(pre_image_path, yolo_weights_path))
-                    post_buildings = list(perform_instance_segmentation(post_image_path, yolo_weights_path))
+            if not os.path.exists(post_path):
+                print(f"Warning: Post-disaster image not found for {pre_filename}")
+                continue
 
-                    num_buildings = min(len(pre_buildings), len(post_buildings))
-                    building_results = []
+            pre_instances = list(perform_instance_segmentation(pre_path, yolo_weights_path))
+            post_instances = list(perform_instance_segmentation(post_path, yolo_weights_path))
 
-                    for i in range(num_buildings):
-                        try:
-                            pre_crop, _, _ = pre_buildings[i]
-                            post_crop, bbox, predicted_mask = post_buildings[i]
+            print(f"Processing pair: {pre_filename} & {post_filename}")
+            print(f"  Detected {len(pre_instances)} pre-disaster instances, {len(post_instances)} post-disaster instances.")
 
-                            pre_tensor = transform(pre_crop).unsqueeze(0).to(device)
-                            post_tensor = transform(post_crop).unsqueeze(0).to(device)
+            # Match instances by IoU
+            matches = match_instances(pre_instances, post_instances)
+            matched_pre = {i for i, _ in matches}
+            matched_post = {j for _, j in matches}
 
-                            outputs = classification_model(pre_tensor, post_tensor)
-                            _, predicted = torch.max(outputs, 1)
-                            damage_level = {0: 'no-damage', 1: 'minor-damage',
-                                            2: 'major-damage', 3: 'destroyed'}[predicted.item()]
+            predictions = []
+            boxes = []
+            masks = []
 
-                            building_results.append((bbox, damage_level, predicted_mask))
-                        except Exception as e:
-                            print(f"Error processing building {i}: {str(e)}")
-                            continue
+            # Handle matched pairs
+            for i_pre, i_post in matches:
+                pre_crop, _, _ = pre_instances[i_pre]
+                post_crop, bbox, post_mask = post_instances[i_post]
 
-                    results[post_filename] = building_results
+                pre_t = transform(pre_crop).unsqueeze(0).to(device)
+                post_t = transform(post_crop).unsqueeze(0).to(device)
+                outputs = classification_model(pre_t, post_t)
+                _, pred = torch.max(outputs, 1)
+                level = {0:'no-damage',1:'minor-damage',2:'major-damage',3:'destroyed'}[pred.item()]
+
+                predictions.append(level)
+                boxes.append(bbox)
+                masks.append(post_mask)
+
+            # Handle unmatched pre instances as destroyed
+            for i_pre in set(range(len(pre_instances))) - matched_pre:
+                _, bbox_pre, pre_mask = pre_instances[i_pre]
+
+                iou_with_post = [
+                    mask_iou(pre_mask > 0, post_mask > 0) if post_mask is not None else 0
+                    for _, _, post_mask in post_instances
+                ]
+
+                if max(iou_with_post, default=0) < 0.1:
+                    predictions.append('destroyed')
+                    boxes.append(bbox_pre)
+                    masks.append(pre_mask)
+                else:
+                    continue
+            for j_post in set(range(len(post_instances))) - matched_post:
+                _, bbox, post_mask = post_instances[j_post]
+                predictions.append('no-damage')
+                boxes.append(bbox)
+                masks.append(post_mask)
+            # Store results
+            results[post_filename] = list(zip(boxes, predictions, masks))
 
     # Save results
     with open(results_path, 'wb') as f:
         pickle.dump(results, f)
-    print(f"Predictions saved to: {results_path}")
 
     # Visualize results
     visualize_masks(base_path, results, labels=True)
@@ -248,3 +354,4 @@ def predict(base_path="classification",
 
 if __name__ == "__main__":
     predict()
+

@@ -1,0 +1,14 @@
+Yolo Localization Training Results Summary:
+    Best mAP50: 0.791
+    Best Precision: 0.804
+    Best Recall: 0.726
+
+Classification Training Results Summary:
+    Macro F1: 0.6937
+
+              precision    recall  f1-score
+
+           0     0.7044    0.7863    0.7431
+           1     0.6427    0.6604    0.6514
+           2     0.6804    0.5814    0.6271
+           3     0.7629    0.7436    0.7531

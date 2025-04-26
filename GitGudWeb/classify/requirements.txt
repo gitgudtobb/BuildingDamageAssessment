@@ -6,3 +6,4 @@ pillow
 ultralytics
 transformers
 tqdm
+scipy
